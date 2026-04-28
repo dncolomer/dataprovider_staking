@@ -57,7 +57,7 @@ pub(crate) use update_admin::{
     __client_accounts_propose_admin,
 };
 
-declare_id!("GyZKxaZaLZtKLes5JgJfEHZUBhrtuMgTNtuLiEU59Bqd");
+declare_id!("AnConH6PVX1UQYtdPgAgUNMowphcragEjbGsx3nQJ6up");
 
 #[program]
 pub mod dataprovider_staking {

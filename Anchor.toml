@@ -15,11 +15,8 @@ skip-lint = false
 [programs.localnet]
 dataprovider_staking = "GyZKxaZaLZtKLes5JgJfEHZUBhrtuMgTNtuLiEU59Bqd"
 
-# Devnet deployment is intentionally not configured yet. When ready, generate
-# a new program-id keypair (`solana-keygen new -o target/deploy/...`) and
-# populate this block:
-# [programs.devnet]
-# dataprovider_staking = "<YOUR_DEVNET_PROGRAM_ID>"
+[programs.devnet]
+dataprovider_staking = "AnConH6PVX1UQYtdPgAgUNMowphcragEjbGsx3nQJ6up"
 
 [provider]
 cluster = "localnet"

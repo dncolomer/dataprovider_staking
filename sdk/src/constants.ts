@@ -5,7 +5,7 @@ import { PublicKey } from "@solana/web3.js";
  * This is a placeholder for local testing; update before devnet/mainnet deploy.
  */
 export const DATAPROVIDER_STAKING_PROGRAM_ID = new PublicKey(
-  "GyZKxaZaLZtKLes5JgJfEHZUBhrtuMgTNtuLiEU59Bqd",
+  "AnConH6PVX1UQYtdPgAgUNMowphcragEjbGsx3nQJ6up",
 );
 
 /**

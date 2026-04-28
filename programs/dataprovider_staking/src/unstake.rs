@@ -48,6 +48,7 @@ pub struct Unstake<'info> {
     #[account(
         mut,
         token::mint = stake_mint,
+        token::authority = user,
     )]
     pub user_token_account: Box<Account<'info, TokenAccount>>,
 
