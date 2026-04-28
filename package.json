@@ -1,0 +1,30 @@
+{
+  "name": "dataprovider-staking-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Monorepo for the dataprovider_staking Solana program, SDK, admin scripts, and investor web app.",
+  "workspaces": [
+    "sdk",
+    "scripts",
+    "web"
+  ],
+  "scripts": {
+    "build:program": "anchor build",
+    "test:program": "cargo test -p dataprovider_staking --release",
+    "build:sdk": "npm run build --workspace sdk",
+    "build:scripts": "npm run build --workspace scripts",
+    "dev:web": "npm run dev --workspace web",
+    "build": "npm run build:sdk && npm run build:scripts"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "prettier": "^3.2.5",
+    "@types/node": "^20.11.30"
+  },
+  "overrides": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0"
+  }
+}

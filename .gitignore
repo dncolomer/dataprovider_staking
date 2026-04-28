@@ -1,0 +1,30 @@
+.anchor
+.DS_Store
+target
+**/*.rs.bk
+node_modules
+test-ledger
+.yarn
+.surfpool
+
+# Node / TS
+dist
+.next
+*.tsbuildinfo
+
+# Web runtime config (secrets shouldn't live here, but keep it local-only)
+web/.env.local
+web/.env.*.local
+
+# OS / editor
+.vscode
+.idea
+*.swp
+
+# Solana keypairs at root (program id keypair should live under target/)
+wallet-*.json
+admin-*.json
+
+# Build-time IDL copies (regenerated from target/idl)
+sdk/idl/*.json
+sdk/src/idl-types.ts

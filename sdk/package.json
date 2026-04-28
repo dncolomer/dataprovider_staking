@@ -1,0 +1,26 @@
+{
+  "name": "@dataprovider/staking-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the dataprovider_staking Solana program.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "idl"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "prebuild": "npm run sync-idl",
+    "sync-idl": "mkdir -p idl && cp ../target/idl/dataprovider_staking.json idl/ && cp ../target/types/dataprovider_staking.ts src/idl-types.ts"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.31.1",
+    "@solana/spl-token": "^0.4.8",
+    "@solana/web3.js": "^1.95.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.11.30"
+  }
+}

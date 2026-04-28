@@ -1,0 +1,26 @@
+{
+  "name": "@dataprovider/staking-scripts",
+  "version": "0.1.0",
+  "description": "Admin CLI scripts for the dataprovider_staking program.",
+  "private": true,
+  "bin": {
+    "dps-admin": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "cli": "ts-node src/cli.ts",
+    "dev": "ts-node src/cli.ts"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.31.1",
+    "@dataprovider/staking-sdk": "*",
+    "@solana/spl-token": "^0.4.8",
+    "@solana/web3.js": "^1.95.3",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
+  }
+}

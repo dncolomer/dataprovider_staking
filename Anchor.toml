@@ -1,0 +1,31 @@
+# Anchor.toml — cluster-specific settings.
+#
+# `[provider]` is the ACTIVE cluster `anchor deploy`/`anchor test` will use.
+# For local work keep `cluster = "localnet"`. To deploy to devnet later, flip
+# it (or pass `--provider.cluster devnet`) and make sure your wallet has
+# devnet SOL.
+
+[toolchain]
+package_manager = "npm"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+dataprovider_staking = "GyZKxaZaLZtKLes5JgJfEHZUBhrtuMgTNtuLiEU59Bqd"
+
+# Devnet deployment is intentionally not configured yet. When ready, generate
+# a new program-id keypair (`solana-keygen new -o target/deploy/...`) and
+# populate this block:
+# [programs.devnet]
+# dataprovider_staking = "<YOUR_DEVNET_PROGRAM_ID>"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "cargo test -p dataprovider_staking --release"
+
+[hooks]
