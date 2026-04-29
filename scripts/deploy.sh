@@ -194,7 +194,7 @@ popd >/dev/null
 if [[ "$SKIP_POOL" == "1" ]]; then
     log "skipping add-pool per --skip-pool"
 else
-    confirm "Add $GHC1CHEM_MINT ($GHC1CHEM) pool now?"
+    confirm "Add $GHC1CHEM_MINT pool now?"
     pushd "$ROOT_DIR/scripts" >/dev/null
     npx ts-node src/cli.ts \
         --cluster "$CLUSTER" \
