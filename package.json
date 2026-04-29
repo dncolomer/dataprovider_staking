@@ -13,8 +13,10 @@
     "test:program": "cargo test -p dataprovider_staking --release",
     "build:sdk": "npm run build --workspace sdk",
     "build:scripts": "npm run build --workspace scripts",
+    "build:web": "npm run build --workspace sdk && npm run build --workspace web",
     "dev:web": "npm run dev --workspace web",
-    "build": "npm run build:sdk && npm run build:scripts"
+    "build": "npm run build:sdk && npm run build:scripts",
+    "vercel-build": "npm run build --workspace sdk && npm run build --workspace web"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

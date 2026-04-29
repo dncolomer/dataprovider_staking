@@ -11,8 +11,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch",
-    "prebuild": "npm run sync-idl",
-    "sync-idl": "mkdir -p idl && cp ../target/idl/dataprovider_staking.json idl/ && cp ../target/types/dataprovider_staking.ts src/idl-types.ts"
+    "prebuild": "npm run sync-idl -- --if-exists",
+    "sync-idl": "node -e \"const fs=require('fs'),path=require('path');const ifExists=process.argv.includes('--if-exists');const idlSrc='../target/idl/dataprovider_staking.json';const typesSrc='../target/types/dataprovider_staking.ts';if(!fs.existsSync(idlSrc)){if(ifExists){console.log('[sync-idl] target/ not present, using committed IDL (prod build)');process.exit(0);}else{console.error('[sync-idl] '+idlSrc+' not found. Run anchor build first.');process.exit(1);}}fs.mkdirSync('idl',{recursive:true});fs.copyFileSync(idlSrc,'idl/dataprovider_staking.json');fs.copyFileSync(typesSrc,'src/idl-types.ts');console.log('[sync-idl] copied IDL + types from target/');\" --"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.1",

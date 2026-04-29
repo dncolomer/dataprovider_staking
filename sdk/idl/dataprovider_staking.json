@@ -1,0 +1,1197 @@
+{
+  "address": "94Ja6Y8AuzmZHjQiyk2SzvoysnBr3F17nfHGrHm1idAZ",
+  "metadata": {
+    "name": "dataprovider_staking",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "GHC1CHEM multi-mint staking with USDC dividend distribution"
+  },
+  "instructions": [
+    {
+      "name": "accept_admin",
+      "docs": [
+        "New admin: accept a proposed admin rotation."
+      ],
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "new_admin",
+          "docs": [
+            "The new admin; must equal `config.pending_admin` and sign."
+          ],
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "add_pool",
+      "docs": [
+        "Admin: register a new stake-mint pool (with stake + reward vaults)."
+      ],
+      "discriminator": [
+        115,
+        230,
+        212,
+        211,
+        175,
+        49,
+        39,
+        169
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "stake_mint"
+        },
+        {
+          "name": "usdc_mint",
+          "docs": [
+            "USDC mint; must match the one recorded at `initialize`."
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_authority",
+          "docs": [
+            "PDA authority that will own both vaults. Not deserialized; only used",
+            "to derive its bump."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "reward_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  119,
+                  97,
+                  114,
+                  100,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_token_program",
+          "docs": [
+            "Token program matching the `stake_mint` owner (SPL Token or Token-2022)."
+          ]
+        },
+        {
+          "name": "usdc_token_program",
+          "docs": [
+            "Token program matching the `usdc_mint` owner (SPL Token or Token-2022).",
+            "Usually classic SPL Token for mainnet USDC."
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancel_admin_proposal",
+      "docs": [
+        "Admin: cancel a pending admin rotation."
+      ],
+      "discriminator": [
+        68,
+        6,
+        145,
+        131,
+        16,
+        73,
+        182,
+        229
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_rewards",
+      "docs": [
+        "User: claim all pending USDC rewards from a pool."
+      ],
+      "discriminator": [
+        4,
+        144,
+        132,
+        71,
+        116,
+        23,
+        151,
+        80
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_mint",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "reward_vault",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_stake",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_mint"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "docs": [
+            "Token program matching the USDC mint (classic SPL on mainnet today)."
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "deposit_rewards",
+      "docs": [
+        "Admin: deposit `amount` USDC into a pool's reward vault. Distributed",
+        "pro-rata to current stakers via the reward-per-share accumulator."
+      ],
+      "discriminator": [
+        52,
+        249,
+        112,
+        72,
+        206,
+        161,
+        196,
+        1
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "stake_mint",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "reward_vault",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "admin_usdc_account",
+          "docs": [
+            "The admin's USDC source account."
+          ],
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "docs": [
+            "Token program matching the USDC mint (classic SPL on mainnet today)."
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize",
+      "docs": [
+        "Bootstraps the program. Signer becomes the initial admin."
+      ],
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin",
+          "docs": [
+            "The initial admin. Must sign so that the admin key is authenticated at",
+            "bootstrap (prevents front-running of config creation with a wrong admin)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "usdc_mint",
+          "docs": [
+            "The USDC mint used as the reward currency for every pool."
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "propose_admin",
+      "docs": [
+        "Admin: propose a new admin (2-step transfer)."
+      ],
+      "discriminator": [
+        121,
+        214,
+        199,
+        212,
+        87,
+        39,
+        117,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "new_admin",
+          "docs": [
+            "authentication happens when this pubkey signs `accept_admin`."
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "stake",
+      "docs": [
+        "User: deposit `amount` of `stake_mint` into the pool."
+      ],
+      "discriminator": [
+        206,
+        176,
+        202,
+        18,
+        200,
+        209,
+        179,
+        108
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "stake_mint",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_vault",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "user_stake",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_mint"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "unstake",
+      "docs": [
+        "User: withdraw `amount` of their staked tokens from the pool."
+      ],
+      "discriminator": [
+        90,
+        95,
+        107,
+        42,
+        205,
+        124,
+        50,
+        225
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "signer": true
+        },
+        {
+          "name": "stake_mint",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_vault",
+          "writable": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_stake",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_mint"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "GlobalConfig",
+      "discriminator": [
+        149,
+        8,
+        156,
+        202,
+        160,
+        252,
+        176,
+        217
+      ]
+    },
+    {
+      "name": "TokenPool",
+      "discriminator": [
+        103,
+        51,
+        150,
+        210,
+        226,
+        131,
+        104,
+        33
+      ]
+    },
+    {
+      "name": "UserStake",
+      "discriminator": [
+        102,
+        53,
+        163,
+        107,
+        9,
+        138,
+        87,
+        153
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "MathOverflow",
+      "msg": "Arithmetic overflow."
+    },
+    {
+      "code": 6001,
+      "name": "Unauthorized",
+      "msg": "Caller is not the program admin."
+    },
+    {
+      "code": 6002,
+      "name": "NotPendingAdmin",
+      "msg": "Caller is not the pending admin for this handover."
+    },
+    {
+      "code": 6003,
+      "name": "NoPendingAdmin",
+      "msg": "No pending admin handover in progress."
+    },
+    {
+      "code": 6004,
+      "name": "MaxPoolsReached",
+      "msg": "Maximum number of pools already created."
+    },
+    {
+      "code": 6005,
+      "name": "PoolAlreadyExists",
+      "msg": "Pool already exists for this mint."
+    },
+    {
+      "code": 6006,
+      "name": "ZeroAmount",
+      "msg": "Amount must be greater than zero."
+    },
+    {
+      "code": 6007,
+      "name": "InsufficientStake",
+      "msg": "Insufficient staked balance for requested withdrawal."
+    },
+    {
+      "code": 6008,
+      "name": "NothingToClaim",
+      "msg": "No rewards available to claim."
+    },
+    {
+      "code": 6009,
+      "name": "NoStakersInPool",
+      "msg": "Pool has no stakers yet; rewards cannot be distributed."
+    },
+    {
+      "code": 6010,
+      "name": "InvalidRewardMint",
+      "msg": "Reward vault mint does not match the USDC mint configured in GlobalConfig."
+    },
+    {
+      "code": 6011,
+      "name": "InvalidStakeMint",
+      "msg": "Stake vault mint does not match the pool's stake mint."
+    },
+    {
+      "code": 6012,
+      "name": "RewardDepositTooSmall",
+      "msg": "Reward deposit too small to distribute; would round to zero."
+    }
+  ],
+  "types": [
+    {
+      "name": "GlobalConfig",
+      "docs": [
+        "Singleton config account. Holds the admin authority (updateable only by the",
+        "current admin) and the USDC mint used for every pool's reward vault."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "docs": [
+              "Authority permitted to add pools, deposit rewards, and rotate the admin."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_admin",
+            "docs": [
+              "Pending admin for 2-step admin rotation. `Pubkey::default()` when no",
+              "handover is in progress."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "usdc_mint",
+            "docs": [
+              "USDC mint used as the reward currency for every pool."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pool_count",
+            "docs": [
+              "Number of pools that have been created so far."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenPool",
+      "docs": [
+        "Per-stake-mint pool. Holds the staking vault, reward (USDC) vault, and the",
+        "running pro-rata accumulator used to compute each user's earnings."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "stake_mint",
+            "docs": [
+              "The SPL mint users stake into this pool."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "stake_vault",
+            "docs": [
+              "PDA-owned token account holding all staked tokens for this pool."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_vault",
+            "docs": [
+              "PDA-owned token account holding all undistributed USDC rewards."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "total_staked",
+            "docs": [
+              "Total tokens currently staked across all users in this pool."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "acc_reward_per_share",
+            "docs": [
+              "Accumulated USDC reward per staked token unit, scaled by `ACC_PRECISION`.",
+              "",
+              "Invariant: increases monotonically every time rewards are deposited",
+              "while `total_staked > 0`."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "total_rewards_deposited",
+            "docs": [
+              "Lifetime USDC deposited as rewards into this pool (for accounting)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_rewards_claimed",
+            "docs": [
+              "Lifetime USDC actually claimed by users from this pool."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump for the pool account."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "vault_authority_bump",
+            "docs": [
+              "PDA bump for the stake vault authority."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserStake",
+      "docs": [
+        "Per-user, per-pool staking position."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "docs": [
+              "Owner of this stake position."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "stake_mint",
+            "docs": [
+              "Pool this position belongs to (redundant but useful for indexers)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Tokens currently staked by the owner in this pool."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reward_debt",
+            "docs": [
+              "Reward-debt in MasterChef accounting. Equals `amount * acc_reward_per_share / ACC_PRECISION`",
+              "at the time of the last settlement."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "pending_rewards",
+            "docs": [
+              "Rewards already settled to the user's \"claimable\" bucket but not yet",
+              "transferred out of the reward vault."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_claimed",
+            "docs": [
+              "Lifetime USDC claimed by this user from this pool."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ],
+  "constants": [
+    {
+      "name": "CONFIG_SEED",
+      "docs": [
+        "PDA seed for `GlobalConfig`."
+      ],
+      "type": "bytes",
+      "value": "[99, 111, 110, 102, 105, 103]"
+    },
+    {
+      "name": "POOL_SEED",
+      "docs": [
+        "PDA seed prefix for a `TokenPool`. Full seeds: [`POOL_SEED`, stake_mint]."
+      ],
+      "type": "bytes",
+      "value": "[112, 111, 111, 108]"
+    },
+    {
+      "name": "USER_SEED",
+      "docs": [
+        "PDA seed prefix for a `UserStake`. Full seeds: [`USER_SEED`, stake_mint, owner]."
+      ],
+      "type": "bytes",
+      "value": "[117, 115, 101, 114]"
+    },
+    {
+      "name": "VAULT_AUTH_SEED",
+      "docs": [
+        "PDA seed prefix for a pool's stake-vault authority. Full seeds:",
+        "[`VAULT_AUTH_SEED`, stake_mint]. This PDA owns both the stake-vault",
+        "and the reward-vault token accounts for the pool."
+      ],
+      "type": "bytes",
+      "value": "[118, 97, 117, 108, 116, 95, 97, 117, 116, 104]"
+    }
+  ]
+}

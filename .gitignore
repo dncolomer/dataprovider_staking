@@ -28,6 +28,9 @@ admin-*.json
 # Any keys directory (admin wallets, backup program keypairs, etc.)
 keys/
 
-# Build-time IDL copies (regenerated from target/idl)
-sdk/idl/*.json
-sdk/src/idl-types.ts
+# Build-time IDL copies are committed so downstream packages (web app
+# deployed to Vercel, SDK consumers via git) can build without needing
+# the Rust toolchain. `npm run sync-idl` regenerates them after a fresh
+# `anchor build`.
+# sdk/idl/*.json          # intentionally tracked
+# sdk/src/idl-types.ts    # intentionally tracked
