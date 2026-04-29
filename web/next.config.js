@@ -12,6 +12,11 @@ const nextConfig = {
       path: false,
       crypto: false,
     };
+    // pino (transitive dep via WalletConnect) optionally tries to load
+    // pino-pretty for dev-friendly logs. It's not installed and not needed
+    // in production; mark it external so webpack doesn't try to resolve it.
+    config.externals = config.externals || [];
+    config.externals.push({ "pino-pretty": "commonjs pino-pretty" });
     return config;
   },
 };
