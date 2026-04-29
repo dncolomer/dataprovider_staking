@@ -33,6 +33,14 @@ pub const POOL_SEED: &[u8] = b"pool";
 pub const VAULT_AUTH_SEED: &[u8] = b"vault_auth";
 pub const USER_SEED: &[u8] = b"user";
 
+/// Classic SPL Token program id (Tokenkeg…).
+pub const SPL_TOKEN_ID: Pubkey = spl_token::ID;
+
+/// Token-2022 program id (TokenzQd…).
+/// Hardcoded from the canonical Token-2022 program; litesvm-token's embedded
+/// token-2022 program is loaded by default.
+pub const TOKEN_2022_ID: Pubkey = solana_pubkey::pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
 /// A loaded litesvm environment with the staking program preloaded.
 pub struct Env {
     pub svm: LiteSVM,
@@ -82,7 +90,19 @@ impl Env {
             .unwrap()
     }
 
-    /// Create ATA for owner and mint.
+    /// Create a fresh Token-2022 mint (no extensions) with given decimals.
+    pub fn create_mint_2022(&mut self, decimals: u8) -> Pubkey {
+        let payer_pk = self.payer.pubkey();
+        let payer = self.payer.insecure_clone();
+        CreateMint::new(&mut self.svm, &payer)
+            .decimals(decimals)
+            .authority(&payer_pk)
+            .token_program_id(&TOKEN_2022_ID)
+            .send()
+            .unwrap()
+    }
+
+    /// Create ATA for owner and mint (classic SPL Token program).
     pub fn create_ata(&mut self, owner: &Pubkey, mint: &Pubkey) -> Pubkey {
         let payer = self.payer.insecure_clone();
         CreateAssociatedTokenAccount::new(&mut self.svm, &payer, mint)
@@ -91,7 +111,17 @@ impl Env {
             .unwrap()
     }
 
-    /// Mint `amount` to `destination` ATA, signed by env payer (must be mint auth).
+    /// Create ATA for a Token-2022 mint.
+    pub fn create_ata_2022(&mut self, owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+        let payer = self.payer.insecure_clone();
+        CreateAssociatedTokenAccount::new(&mut self.svm, &payer, mint)
+            .owner(owner)
+            .token_program_id(&TOKEN_2022_ID)
+            .send()
+            .unwrap()
+    }
+
+    /// Mint `amount` to `destination` ATA, classic SPL Token program.
     pub fn mint_to(&mut self, mint: &Pubkey, destination: &Pubkey, amount: u64) {
         let payer = self.payer.insecure_clone();
         MintTo::new(&mut self.svm, &payer, mint, destination, amount)
@@ -99,8 +129,20 @@ impl Env {
             .unwrap();
     }
 
+    /// Mint `amount` of a Token-2022 mint to `destination` ATA.
+    pub fn mint_to_2022(&mut self, mint: &Pubkey, destination: &Pubkey, amount: u64) {
+        let payer = self.payer.insecure_clone();
+        MintTo::new(&mut self.svm, &payer, mint, destination, amount)
+            .token_program_id(&TOKEN_2022_ID)
+            .send()
+            .unwrap();
+    }
+
     pub fn token_balance(&self, ata: &Pubkey) -> u64 {
         let acct = self.svm.get_account(ata).expect("ata exists");
+        // Works for both classic SPL and Token-2022: the first 165 bytes of
+        // a Token-2022 account are the same layout as a classic SPL account;
+        // extensions live after that region.
         let parsed = <spl_token::state::Account as solana_program_pack::Pack>::unpack(
             &acct.data[..spl_token::state::Account::LEN],
         )
@@ -125,6 +167,19 @@ impl Env {
         let acct = self.svm.get_account(&pda).expect("user pda");
         UserStake::try_deserialize(&mut &acct.data[..]).unwrap()
     }
+}
+
+/// Assert that a transaction result failed with a specific Anchor custom error code.
+/// Anchor custom errors start at 6000 + enum index.
+pub fn assert_error(res: Result<TransactionMetadata, String>, expected_code: u32) {
+    let err = res.expect_err("expected tx to fail");
+    let needle = format!("Custom({})", expected_code);
+    assert!(
+        err.contains(&needle),
+        "expected error {} in: {}",
+        needle,
+        err
+    );
 }
 
 // Need Pack for SPL Account size/unpack.
@@ -181,6 +236,26 @@ pub fn ix_add_pool(
     stake_mint: &Pubkey,
     usdc_mint: &Pubkey,
 ) -> Instruction {
+    ix_add_pool_with_programs(
+        payer,
+        admin,
+        stake_mint,
+        usdc_mint,
+        &spl_token::ID,
+        &spl_token::ID,
+    )
+}
+
+/// Like `ix_add_pool` but lets callers pass the stake-mint token program
+/// (classic SPL or Token-2022) and the USDC token program independently.
+pub fn ix_add_pool_with_programs(
+    payer: &Pubkey,
+    admin: &Pubkey,
+    stake_mint: &Pubkey,
+    usdc_mint: &Pubkey,
+    stake_token_program: &Pubkey,
+    usdc_token_program: &Pubkey,
+) -> Instruction {
     let (config, _) = derive_config();
     let (pool, _) = derive_pool(stake_mint);
     let (vault_auth, _) = derive_vault_auth(stake_mint);
@@ -198,7 +273,8 @@ pub fn ix_add_pool(
             AccountMeta::new_readonly(vault_auth, false),
             AccountMeta::new(stake_vault, false),
             AccountMeta::new(reward_vault, false),
-            AccountMeta::new_readonly(spl_token::ID, false),
+            AccountMeta::new_readonly(*stake_token_program, false),
+            AccountMeta::new_readonly(*usdc_token_program, false),
             AccountMeta::new_readonly(solana_system_interface::program::ID, false),
             AccountMeta::new_readonly(solana_sysvar::rent::ID, false),
         ],
@@ -212,6 +288,22 @@ pub fn ix_stake(
     user_token_account: &Pubkey,
     amount: u64,
 ) -> Instruction {
+    ix_stake_with_program(
+        user,
+        stake_mint,
+        user_token_account,
+        amount,
+        &spl_token::ID,
+    )
+}
+
+pub fn ix_stake_with_program(
+    user: &Pubkey,
+    stake_mint: &Pubkey,
+    user_token_account: &Pubkey,
+    amount: u64,
+    token_program: &Pubkey,
+) -> Instruction {
     let (pool, _) = derive_pool(stake_mint);
     let (stake_vault, _) = derive_stake_vault(stake_mint);
     let (user_stake, _) = derive_user(stake_mint, user);
@@ -224,7 +316,7 @@ pub fn ix_stake(
             AccountMeta::new(stake_vault, false),
             AccountMeta::new(user_stake, false),
             AccountMeta::new(*user_token_account, false),
-            AccountMeta::new_readonly(spl_token::ID, false),
+            AccountMeta::new_readonly(*token_program, false),
             AccountMeta::new_readonly(solana_system_interface::program::ID, false),
             AccountMeta::new_readonly(solana_sysvar::rent::ID, false),
         ],
@@ -237,6 +329,22 @@ pub fn ix_unstake(
     stake_mint: &Pubkey,
     user_token_account: &Pubkey,
     amount: u64,
+) -> Instruction {
+    ix_unstake_with_program(
+        user,
+        stake_mint,
+        user_token_account,
+        amount,
+        &spl_token::ID,
+    )
+}
+
+pub fn ix_unstake_with_program(
+    user: &Pubkey,
+    stake_mint: &Pubkey,
+    user_token_account: &Pubkey,
+    amount: u64,
+    token_program: &Pubkey,
 ) -> Instruction {
     let (pool, _) = derive_pool(stake_mint);
     let (stake_vault, _) = derive_stake_vault(stake_mint);
@@ -252,7 +360,7 @@ pub fn ix_unstake(
             AccountMeta::new_readonly(vault_auth, false),
             AccountMeta::new(user_stake, false),
             AccountMeta::new(*user_token_account, false),
-            AccountMeta::new_readonly(spl_token::ID, false),
+            AccountMeta::new_readonly(*token_program, false),
         ],
         data: dataprovider_staking::instruction::Unstake { amount }.data(),
     }
@@ -264,6 +372,24 @@ pub fn ix_deposit_rewards(
     usdc_mint: &Pubkey,
     admin_usdc_account: &Pubkey,
     amount: u64,
+) -> Instruction {
+    ix_deposit_rewards_with_program(
+        admin,
+        stake_mint,
+        usdc_mint,
+        admin_usdc_account,
+        amount,
+        &spl_token::ID,
+    )
+}
+
+pub fn ix_deposit_rewards_with_program(
+    admin: &Pubkey,
+    stake_mint: &Pubkey,
+    usdc_mint: &Pubkey,
+    admin_usdc_account: &Pubkey,
+    amount: u64,
+    token_program: &Pubkey,
 ) -> Instruction {
     let (config, _) = derive_config();
     let (pool, _) = derive_pool(stake_mint);
@@ -278,7 +404,7 @@ pub fn ix_deposit_rewards(
             AccountMeta::new(reward_vault, false),
             AccountMeta::new_readonly(*usdc_mint, false),
             AccountMeta::new(*admin_usdc_account, false),
-            AccountMeta::new_readonly(spl_token::ID, false),
+            AccountMeta::new_readonly(*token_program, false),
         ],
         data: dataprovider_staking::instruction::DepositRewards { amount }.data(),
     }
@@ -289,6 +415,22 @@ pub fn ix_claim_rewards(
     stake_mint: &Pubkey,
     usdc_mint: &Pubkey,
     user_usdc_account: &Pubkey,
+) -> Instruction {
+    ix_claim_rewards_with_program(
+        user,
+        stake_mint,
+        usdc_mint,
+        user_usdc_account,
+        &spl_token::ID,
+    )
+}
+
+pub fn ix_claim_rewards_with_program(
+    user: &Pubkey,
+    stake_mint: &Pubkey,
+    usdc_mint: &Pubkey,
+    user_usdc_account: &Pubkey,
+    token_program: &Pubkey,
 ) -> Instruction {
     let (config, _) = derive_config();
     let (pool, _) = derive_pool(stake_mint);
@@ -307,7 +449,7 @@ pub fn ix_claim_rewards(
             AccountMeta::new_readonly(vault_auth, false),
             AccountMeta::new(user_stake, false),
             AccountMeta::new(*user_usdc_account, false),
-            AccountMeta::new_readonly(spl_token::ID, false),
+            AccountMeta::new_readonly(*token_program, false),
         ],
         data: dataprovider_staking::instruction::ClaimRewards {}.data(),
     }
@@ -347,6 +489,60 @@ pub fn ix_cancel_admin_proposal(admin: &Pubkey) -> Instruction {
             AccountMeta::new_readonly(*admin, true),
         ],
         data: dataprovider_staking::instruction::CancelAdminProposal {}.data(),
+    }
+}
+
+// ----- Raw instruction builders (for negative tests with wrong accounts) -----
+
+pub fn ix_stake_raw(
+    user: &Pubkey,
+    stake_mint: &Pubkey,
+    pool: &Pubkey,
+    stake_vault: &Pubkey,
+    user_stake: &Pubkey,
+    user_token_account: &Pubkey,
+    amount: u64,
+) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(*user, true),
+            AccountMeta::new_readonly(*stake_mint, false),
+            AccountMeta::new(*pool, false),
+            AccountMeta::new(*stake_vault, false),
+            AccountMeta::new(*user_stake, false),
+            AccountMeta::new(*user_token_account, false),
+            AccountMeta::new_readonly(spl_token::ID, false),
+            AccountMeta::new_readonly(solana_system_interface::program::ID, false),
+            AccountMeta::new_readonly(solana_sysvar::rent::ID, false),
+        ],
+        data: dataprovider_staking::instruction::Stake { amount }.data(),
+    }
+}
+
+pub fn ix_deposit_rewards_raw(
+    admin: &Pubkey,
+    stake_mint: &Pubkey,
+    pool: &Pubkey,
+    reward_vault: &Pubkey,
+    usdc_mint: &Pubkey,
+    admin_usdc_account: &Pubkey,
+    amount: u64,
+) -> Instruction {
+    let (config, _) = derive_config();
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new_readonly(config, false),
+            AccountMeta::new_readonly(*admin, true),
+            AccountMeta::new_readonly(*stake_mint, false),
+            AccountMeta::new(*pool, false),
+            AccountMeta::new(*reward_vault, false),
+            AccountMeta::new_readonly(*usdc_mint, false),
+            AccountMeta::new(*admin_usdc_account, false),
+            AccountMeta::new_readonly(spl_token::ID, false),
+        ],
+        data: dataprovider_staking::instruction::DepositRewards { amount }.data(),
     }
 }
 

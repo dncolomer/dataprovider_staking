@@ -2,10 +2,12 @@
 
 import {
   ACC_PRECISION,
+  ataForTokenProgram,
+  resolveMintTokenProgram,
   type TokenPoolData,
   type UserStakeData,
 } from "@dataprovider/staking-sdk";
-import { getAssociatedTokenAddressSync, getMint } from "@solana/spl-token";
+import { getMint } from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useStakingClient } from "../lib/useStakingClient";
@@ -41,6 +43,10 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
     if (!client) return;
     let cancelled = false;
     (async () => {
+      // Resolve the mint's owning token program (classic SPL vs Token-2022)
+      // so we derive the right ATA for the "Wallet balance" display. The
+      // SDK's stake/unstake calls do the same auto-detection internally.
+      let tokenProgram: PublicKey | null = null;
       try {
         const mint = await getMint(client.provider.connection, pool.stakeMint);
         if (cancelled) return;
@@ -48,11 +54,20 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
       } catch {
         /* ignore */
       }
+      try {
+        tokenProgram = await resolveMintTokenProgram(
+          client.provider.connection,
+          pool.stakeMint,
+        );
+      } catch {
+        /* ignore; leave balance as null */
+      }
       if (user) {
         const us = await client.fetchUserStake(pool.stakeMint, user);
         if (!cancelled) setUserStake(us);
         try {
-          const ata = getAssociatedTokenAddressSync(pool.stakeMint, user);
+          if (!tokenProgram) throw new Error("no token program resolved");
+          const ata = ataForTokenProgram(pool.stakeMint, user, tokenProgram);
           const acc = await client.provider.connection.getTokenAccountBalance(
             ata,
           );

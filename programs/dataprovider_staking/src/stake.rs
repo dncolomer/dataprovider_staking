@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
+use anchor_spl::token_interface::{
+    self, Mint, TokenAccount, TokenInterface, TransferChecked,
+};
 
 use crate::constants::{POOL_SEED, USER_SEED};
 use crate::error::ErrorCode;
@@ -12,12 +14,16 @@ use crate::state::{TokenPool, UserStake};
 /// user's *current* stake using the pool's existing accumulator, then
 /// increment `amount`, then resync `reward_debt`. This guarantees a freshly
 /// added amount earns only from rewards deposited *after* this tx.
+///
+/// Uses `transfer_checked` so the transfer is valid for both classic SPL
+/// Token and Token-2022 mints (Token-2022 requires the mint + decimals to
+/// be passed explicitly).
 #[derive(Accounts)]
 pub struct Stake<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
 
-    pub stake_mint: Box<Account<'info, Mint>>,
+    pub stake_mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
         mut,
@@ -31,8 +37,9 @@ pub struct Stake<'info> {
     #[account(
         mut,
         token::mint = stake_mint,
+        token::token_program = token_program,
     )]
-    pub stake_vault: Box<Account<'info, TokenAccount>>,
+    pub stake_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         init_if_needed,
@@ -47,10 +54,11 @@ pub struct Stake<'info> {
         mut,
         token::mint = stake_mint,
         token::authority = user,
+        token::token_program = token_program,
     )]
-    pub user_token_account: Box<Account<'info, TokenAccount>>,
+    pub user_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
 }
@@ -75,16 +83,19 @@ pub fn handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
     // Settle rewards earned so far based on the CURRENT amount.
     user_stake.settle(pool_acc)?;
 
-    // Transfer tokens from user to vault.
+    // Transfer tokens from user to vault (transfer_checked works for both
+    // classic SPL and Token-2022).
+    let decimals = ctx.accounts.stake_mint.decimals;
     let cpi_ctx = CpiContext::new(
         ctx.accounts.token_program.key(),
-        Transfer {
+        TransferChecked {
             from: ctx.accounts.user_token_account.to_account_info(),
             to: ctx.accounts.stake_vault.to_account_info(),
             authority: ctx.accounts.user.to_account_info(),
+            mint: ctx.accounts.stake_mint.to_account_info(),
         },
     );
-    token::transfer(cpi_ctx, amount)?;
+    token_interface::transfer_checked(cpi_ctx, amount, decimals)?;
 
     // Update balances.
     user_stake.amount = user_stake

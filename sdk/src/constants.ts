@@ -2,9 +2,17 @@ import { PublicKey } from "@solana/web3.js";
 
 /**
  * Deployed program id. Kept in sync with `declare_id!` in the Rust program.
- * This is a placeholder for local testing; update before devnet/mainnet deploy.
+ *
+ * Mainnet / localnet use the same id (`94Ja6Y8A...`); devnet still uses the
+ * legacy `AnConH6PV...` id. Callers targeting devnet should override via the
+ * `programId` option on {@link StakingClient}.
  */
 export const DATAPROVIDER_STAKING_PROGRAM_ID = new PublicKey(
+  "94Ja6Y8AuzmZHjQiyk2SzvoysnBr3F17nfHGrHm1idAZ",
+);
+
+/** Legacy devnet program id (for existing devnet state). */
+export const DATAPROVIDER_STAKING_PROGRAM_ID_DEVNET = new PublicKey(
   "AnConH6PVX1UQYtdPgAgUNMowphcragEjbGsx3nQJ6up",
 );
 

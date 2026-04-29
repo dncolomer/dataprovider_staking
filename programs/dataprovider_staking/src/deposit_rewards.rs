@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
+use anchor_spl::token_interface::{
+    self, Mint, TokenAccount, TokenInterface, TransferChecked,
+};
 
 use crate::constants::{CONFIG_SEED, POOL_SEED};
 use crate::error::ErrorCode;
@@ -12,6 +14,9 @@ use crate::state::{GlobalConfig, TokenPool, ACC_PRECISION};
 /// Requires `total_staked > 0`. If there are no stakers, the admin should
 /// wait until at least one user stakes (otherwise those rewards would be
 /// "lost" to an empty pool).
+///
+/// Also rejects deposits so small that `delta` rounds to zero (the USDC
+/// would be transferred into the vault but could never be claimed).
 #[derive(Accounts)]
 pub struct DepositRewards<'info> {
     #[account(
@@ -23,7 +28,7 @@ pub struct DepositRewards<'info> {
 
     pub admin: Signer<'info>,
 
-    pub stake_mint: Box<Account<'info, Mint>>,
+    pub stake_mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
         mut,
@@ -37,21 +42,24 @@ pub struct DepositRewards<'info> {
     #[account(
         mut,
         token::mint = usdc_mint,
+        token::token_program = token_program,
     )]
-    pub reward_vault: Box<Account<'info, TokenAccount>>,
+    pub reward_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(address = config.usdc_mint @ ErrorCode::InvalidRewardMint)]
-    pub usdc_mint: Box<Account<'info, Mint>>,
+    pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// The admin's USDC source account.
     #[account(
         mut,
         token::mint = usdc_mint,
         token::authority = admin,
+        token::token_program = token_program,
     )]
-    pub admin_usdc_account: Box<Account<'info, TokenAccount>>,
+    pub admin_usdc_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    pub token_program: Program<'info, Token>,
+    /// Token program matching the USDC mint (classic SPL on mainnet today).
+    pub token_program: Interface<'info, TokenInterface>,
 }
 
 pub fn handler(ctx: Context<DepositRewards>, amount: u64) -> Result<()> {
@@ -62,15 +70,17 @@ pub fn handler(ctx: Context<DepositRewards>, amount: u64) -> Result<()> {
     );
 
     // Transfer USDC from admin to reward vault.
+    let decimals = ctx.accounts.usdc_mint.decimals;
     let cpi_ctx = CpiContext::new(
         ctx.accounts.token_program.key(),
-        Transfer {
+        TransferChecked {
             from: ctx.accounts.admin_usdc_account.to_account_info(),
             to: ctx.accounts.reward_vault.to_account_info(),
             authority: ctx.accounts.admin.to_account_info(),
+            mint: ctx.accounts.usdc_mint.to_account_info(),
         },
     );
-    token::transfer(cpi_ctx, amount)?;
+    token_interface::transfer_checked(cpi_ctx, amount, decimals)?;
 
     // Update accumulator: rewards-per-share += amount * PRECISION / total_staked.
     let pool = &mut ctx.accounts.pool;
@@ -78,6 +88,7 @@ pub fn handler(ctx: Context<DepositRewards>, amount: u64) -> Result<()> {
         .checked_mul(ACC_PRECISION)
         .ok_or(ErrorCode::MathOverflow)?
         / (pool.total_staked as u128);
+    require!(delta > 0, ErrorCode::RewardDepositTooSmall);
     pool.acc_reward_per_share = pool
         .acc_reward_per_share
         .checked_add(delta)

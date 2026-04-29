@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::Mint;
+use anchor_spl::token_interface::Mint;
 
 use crate::constants::CONFIG_SEED;
 use crate::state::GlobalConfig;
@@ -11,6 +11,10 @@ use crate::state::GlobalConfig;
 /// the program on-chain is the owner. After deploy, the admin can be rotated
 /// to the production owner (e.g. `6HGeNL5852ykqQNiwT6sC5YFu1xBBwvgtVnUWuf5EfEP`)
 /// via `update_admin` -> `accept_admin`.
+///
+/// `usdc_mint` is typed as `InterfaceAccount<Mint>` so either classic SPL or
+/// Token-2022 USDC mints are accepted (the mainnet USDC is classic SPL today,
+/// but this keeps us flexible for future migrations).
 #[derive(Accounts)]
 pub struct Initialize<'info> {
     #[account(mut)]
@@ -21,7 +25,7 @@ pub struct Initialize<'info> {
     pub admin: Signer<'info>,
 
     /// The USDC mint used as the reward currency for every pool.
-    pub usdc_mint: Account<'info, Mint>,
+    pub usdc_mint: InterfaceAccount<'info, Mint>,
 
     #[account(
         init,

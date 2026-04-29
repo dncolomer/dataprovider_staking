@@ -4,6 +4,14 @@ mod common;
 
 use {common::*, solana_signer::Signer};
 
+// Anchor custom error codes (base 6000 + enum index).
+const ERR_ZERO_AMOUNT: u32 = 6006;
+const ERR_INSUFFICIENT_STAKE: u32 = 6007;
+const ERR_INVALID_REWARD_MINT: u32 = 6010;
+const ERR_INVALID_STAKE_MINT: u32 = 6011;
+const ERR_REWARD_DEPOSIT_TOO_SMALL: u32 = 6012;
+const ERR_MAX_POOLS_REACHED: u32 = 6004;
+
 /// Helper: set up env + config + one pool, returning (admin, usdc, stake_mint).
 fn setup_one_pool(env: &mut Env) -> (solana_keypair::Keypair, solana_pubkey::Pubkey, solana_pubkey::Pubkey) {
     let usdc = env.create_mint(6);
@@ -483,4 +491,408 @@ fn increment_stake_after_deposit_does_not_backfill() {
     )
     .unwrap();
     assert_eq!(env.token_balance(&user_usdc), 1_000);
+}
+
+#[test]
+fn max_pools_reached() {
+    let mut env = Env::new();
+    let usdc = env.create_mint(6);
+    let admin = env.fresh_user(10_000_000_000);
+    let payer = env.payer.insecure_clone();
+
+    env.send(
+        &[ix_initialize(&payer.pubkey(), &admin.pubkey(), &usdc)],
+        &[&payer, &admin],
+    )
+    .unwrap();
+
+    // Create 5 pools (the max).
+    let mut mints = vec![];
+    for _ in 0..5 {
+        let m = env.create_mint(9);
+        mints.push(m);
+        env.send(
+            &[ix_add_pool(&payer.pubkey(), &admin.pubkey(), &m, &usdc)],
+            &[&payer, &admin],
+        )
+        .unwrap();
+    }
+    assert_eq!(env.fetch_config().pool_count, 5);
+
+    // 6th pool must fail.
+    let extra = env.create_mint(9);
+    let res = env.send(
+        &[ix_add_pool(&payer.pubkey(), &admin.pubkey(), &extra, &usdc)],
+        &[&payer, &admin],
+    );
+    assert_error(res, ERR_MAX_POOLS_REACHED);
+}
+
+#[test]
+fn unstake_zero_amount_fails() {
+    let mut env = Env::new();
+    let (_admin, _usdc, stake_mint) = setup_one_pool(&mut env);
+
+    let user = env.fresh_user(5_000_000_000);
+    let user_ata = env.create_ata(&user.pubkey(), &stake_mint);
+    env.mint_to(&stake_mint, &user_ata, 1_000);
+
+    let payer = env.payer.insecure_clone();
+    env.send(
+        &[ix_stake(&user.pubkey(), &stake_mint, &user_ata, 1_000)],
+        &[&payer, &user],
+    )
+    .unwrap();
+
+    let res = env.send(
+        &[ix_unstake(&user.pubkey(), &stake_mint, &user_ata, 0)],
+        &[&payer, &user],
+    );
+    assert_error(res, ERR_ZERO_AMOUNT);
+}
+
+#[test]
+fn deposit_rewards_zero_amount_fails() {
+    let mut env = Env::new();
+    let (admin, usdc, stake_mint) = setup_one_pool(&mut env);
+
+    let user = env.fresh_user(5_000_000_000);
+    let user_ata = env.create_ata(&user.pubkey(), &stake_mint);
+    env.mint_to(&stake_mint, &user_ata, 1_000);
+    let admin_usdc = env.create_ata(&admin.pubkey(), &usdc);
+    env.mint_to(&usdc, &admin_usdc, 1_000_000);
+
+    let payer = env.payer.insecure_clone();
+    env.send(
+        &[ix_stake(&user.pubkey(), &stake_mint, &user_ata, 1_000)],
+        &[&payer, &user],
+    )
+    .unwrap();
+
+    let res = env.send(
+        &[ix_deposit_rewards(&admin.pubkey(), &stake_mint, &usdc, &admin_usdc, 0)],
+        &[&payer, &admin],
+    );
+    assert_error(res, ERR_ZERO_AMOUNT);
+}
+
+#[test]
+fn cannot_unstake_more_than_staked() {
+    let mut env = Env::new();
+    let (_admin, _usdc, stake_mint) = setup_one_pool(&mut env);
+
+    let user = env.fresh_user(5_000_000_000);
+    let user_ata = env.create_ata(&user.pubkey(), &stake_mint);
+    env.mint_to(&stake_mint, &user_ata, 1_000);
+
+    let payer = env.payer.insecure_clone();
+    env.send(
+        &[ix_stake(&user.pubkey(), &stake_mint, &user_ata, 500)],
+        &[&payer, &user],
+    )
+    .unwrap();
+
+    let res = env.send(
+        &[ix_unstake(&user.pubkey(), &stake_mint, &user_ata, 501)],
+        &[&payer, &user],
+    );
+    assert_error(res, ERR_INSUFFICIENT_STAKE);
+}
+
+#[test]
+fn stake_with_wrong_vault_fails() {
+    let mut env = Env::new();
+    let (_admin, _usdc, stake_mint) = setup_one_pool(&mut env);
+
+    let user = env.fresh_user(5_000_000_000);
+    let user_ata = env.create_ata(&user.pubkey(), &stake_mint);
+    env.mint_to(&stake_mint, &user_ata, 1_000);
+
+    // Create a second token account of the same mint (different owner) to use as a fake stake_vault.
+    let fake_owner = env.fresh_user(1_000_000);
+    let fake_vault = env.create_ata(&fake_owner.pubkey(), &stake_mint);
+
+    let (pool, _) = derive_pool(&stake_mint);
+    let (user_stake, _) = derive_user(&stake_mint, &user.pubkey());
+
+    let payer = env.payer.insecure_clone();
+    let res = env.send(
+        &[ix_stake_raw(
+            &user.pubkey(),
+            &stake_mint,
+            &pool,
+            &fake_vault,      // wrong vault for this pool
+            &user_stake,
+            &user_ata,
+            100,
+        )],
+        &[&payer, &user],
+    );
+    assert_error(res, ERR_INVALID_STAKE_MINT);
+}
+
+#[test]
+fn deposit_rewards_with_wrong_reward_vault_fails() {
+    let mut env = Env::new();
+    let (admin, usdc, stake_mint) = setup_one_pool(&mut env);
+
+    let user = env.fresh_user(5_000_000_000);
+    let user_ata = env.create_ata(&user.pubkey(), &stake_mint);
+    env.mint_to(&stake_mint, &user_ata, 1_000);
+    let admin_usdc = env.create_ata(&admin.pubkey(), &usdc);
+    env.mint_to(&usdc, &admin_usdc, 1_000_000);
+
+    let payer = env.payer.insecure_clone();
+    env.send(
+        &[ix_stake(&user.pubkey(), &stake_mint, &user_ata, 1_000)],
+        &[&payer, &user],
+    )
+    .unwrap();
+
+    // Create a second USDC token account (different owner) to use as a fake reward_vault.
+    let fake_owner = env.fresh_user(1_000_000);
+    let fake_reward_vault = env.create_ata(&fake_owner.pubkey(), &usdc);
+
+    let (pool, _) = derive_pool(&stake_mint);
+
+    let res = env.send(
+        &[ix_deposit_rewards_raw(
+            &admin.pubkey(),
+            &stake_mint,
+            &pool,
+            &fake_reward_vault,   // wrong reward vault for this pool
+            &usdc,
+            &admin_usdc,
+            500,
+        )],
+        &[&payer, &admin],
+    );
+    assert_error(res, ERR_INVALID_REWARD_MINT);
+}
+
+#[test]
+fn restake_after_full_unstake_reuses_account() {
+    let mut env = Env::new();
+    let (_admin, usdc, stake_mint) = setup_one_pool(&mut env);
+
+    let user = env.fresh_user(5_000_000_000);
+    let user_ata = env.create_ata(&user.pubkey(), &stake_mint);
+    env.mint_to(&stake_mint, &user_ata, 10_000);
+    let _user_usdc = env.create_ata(&user.pubkey(), &usdc);
+
+    let payer = env.payer.insecure_clone();
+    env.send(
+        &[ix_stake(&user.pubkey(), &stake_mint, &user_ata, 5_000)],
+        &[&payer, &user],
+    )
+    .unwrap();
+
+    let first = env.fetch_user(&stake_mint, &user.pubkey());
+    assert_eq!(first.amount, 5_000);
+
+    // Unstake everything.
+    env.send(
+        &[ix_unstake(&user.pubkey(), &stake_mint, &user_ata, 5_000)],
+        &[&payer, &user],
+    )
+    .unwrap();
+    let after_unstake = env.fetch_user(&stake_mint, &user.pubkey());
+    assert_eq!(after_unstake.amount, 0);
+
+    // Stake again — should reuse the same PDA.
+    env.send(
+        &[ix_stake(&user.pubkey(), &stake_mint, &user_ata, 2_000)],
+        &[&payer, &user],
+    )
+    .unwrap();
+    let second = env.fetch_user(&stake_mint, &user.pubkey());
+    assert_eq!(second.amount, 2_000);
+    assert_eq!(second.total_claimed, first.total_claimed);
+}
+
+#[test]
+fn sequential_deposits_accumulate_correctly() {
+    let mut env = Env::new();
+    let (admin, usdc, stake_mint) = setup_one_pool(&mut env);
+    let admin_usdc = env.create_ata(&admin.pubkey(), &usdc);
+    env.mint_to(&usdc, &admin_usdc, 1_000_000_000);
+
+    let user = env.fresh_user(5_000_000_000);
+    let user_ata = env.create_ata(&user.pubkey(), &stake_mint);
+    env.mint_to(&stake_mint, &user_ata, 1_000);
+    let user_usdc = env.create_ata(&user.pubkey(), &usdc);
+
+    let payer = env.payer.insecure_clone();
+    env.send(
+        &[ix_stake(&user.pubkey(), &stake_mint, &user_ata, 1_000)],
+        &[&payer, &user],
+    )
+    .unwrap();
+
+    // Three sequential deposits without any claim.
+    env.send(
+        &[ix_deposit_rewards(&admin.pubkey(), &stake_mint, &usdc, &admin_usdc, 1_000)],
+        &[&payer, &admin],
+    )
+    .unwrap();
+    env.send(
+        &[ix_deposit_rewards(&admin.pubkey(), &stake_mint, &usdc, &admin_usdc, 2_000)],
+        &[&payer, &admin],
+    )
+    .unwrap();
+    env.send(
+        &[ix_deposit_rewards(&admin.pubkey(), &stake_mint, &usdc, &admin_usdc, 3_000)],
+        &[&payer, &admin],
+    )
+    .unwrap();
+
+    env.send(
+        &[ix_claim_rewards(&user.pubkey(), &stake_mint, &usdc, &user_usdc)],
+        &[&payer, &user],
+    )
+    .unwrap();
+
+    // 1000 + 2000 + 3000 = 6000
+    assert_eq!(env.token_balance(&user_usdc), 6_000);
+    assert_eq!(env.fetch_pool(&stake_mint).total_rewards_deposited, 6_000);
+}
+
+#[test]
+fn tiny_reward_deposit_rejected() {
+    let mut env = Env::new();
+    let (admin, usdc, stake_mint) = setup_one_pool(&mut env);
+    let admin_usdc = env.create_ata(&admin.pubkey(), &usdc);
+    env.mint_to(&usdc, &admin_usdc, 1_000_000);
+
+    // Stake a large amount so that 1 USDC unit yields zero delta.
+    let user = env.fresh_user(5_000_000_000);
+    let user_ata = env.create_ata(&user.pubkey(), &stake_mint);
+    env.mint_to(&stake_mint, &user_ata, 2_000_000_000_000); // 2000 tokens (9 dec)
+
+    let payer = env.payer.insecure_clone();
+    env.send(
+        &[ix_stake(&user.pubkey(), &stake_mint, &user_ata, 2_000_000_000_000)],
+        &[&payer, &user],
+    )
+    .unwrap();
+
+    // amount * ACC_PRECISION / total_staked = 1 * 1e12 / 2e12 = 0 (integer division)
+    let res = env.send(
+        &[ix_deposit_rewards(&admin.pubkey(), &stake_mint, &usdc, &admin_usdc, 1)],
+        &[&payer, &admin],
+    );
+    assert_error(res, ERR_REWARD_DEPOSIT_TOO_SMALL);
+
+    // Slightly larger deposit should succeed: 2 * 1e12 / 2e12 = 1
+    env.send(
+        &[ix_deposit_rewards(&admin.pubkey(), &stake_mint, &usdc, &admin_usdc, 2)],
+        &[&payer, &admin],
+    )
+    .expect("deposit of 2 should succeed");
+}
+
+/// End-to-end Token-2022 stake → deposit → claim.
+///
+/// Creates a Token-2022 stake mint (mirrors the real $GHC1CHEM mint on
+/// mainnet), pairs it with a classic-SPL USDC reward mint, and runs the
+/// full flow: add_pool → stake → deposit_rewards → claim_rewards.
+///
+/// This is the critical regression guard: if the program ever reverts to
+/// pinning the stake token program to classic SPL, this test will fail
+/// because the Token-2022 mint account is owned by `TokenzQd...`, not
+/// `Tokenkeg...`.
+#[test]
+fn token_2022_stake_mint_end_to_end() {
+    let mut env = Env::new();
+
+    // USDC stays classic SPL (matches mainnet USDC).
+    let usdc = env.create_mint(6);
+    // Stake mint is Token-2022.
+    let stake_mint = env.create_mint_2022(9);
+
+    let admin = env.fresh_user(10_000_000_000);
+    let payer = env.payer.insecure_clone();
+
+    // init + add_pool (with the correct token programs for each mint)
+    env.send(
+        &[ix_initialize(&payer.pubkey(), &admin.pubkey(), &usdc)],
+        &[&payer, &admin],
+    )
+    .unwrap();
+    env.send(
+        &[ix_add_pool_with_programs(
+            &payer.pubkey(),
+            &admin.pubkey(),
+            &stake_mint,
+            &usdc,
+            &TOKEN_2022_ID, // stake mint uses Token-2022
+            &SPL_TOKEN_ID,  // USDC uses classic SPL
+        )],
+        &[&payer, &admin],
+    )
+    .expect("add_pool (token-2022 stake mint) ok");
+
+    // Fund admin + user.
+    let admin_usdc = env.create_ata(&admin.pubkey(), &usdc);
+    env.mint_to(&usdc, &admin_usdc, 1_000_000_000);
+
+    let user = env.fresh_user(5_000_000_000);
+    let user_stake_ata = env.create_ata_2022(&user.pubkey(), &stake_mint);
+    env.mint_to_2022(&stake_mint, &user_stake_ata, 1_000_000_000);
+    let user_usdc = env.create_ata(&user.pubkey(), &usdc);
+
+    // Stake (must pass TOKEN_2022_ID).
+    env.send(
+        &[ix_stake_with_program(
+            &user.pubkey(),
+            &stake_mint,
+            &user_stake_ata,
+            1_000_000_000,
+            &TOKEN_2022_ID,
+        )],
+        &[&payer, &user],
+    )
+    .expect("stake (token-2022) ok");
+
+    assert_eq!(
+        env.fetch_pool(&stake_mint).total_staked,
+        1_000_000_000,
+        "pool total_staked should reflect Token-2022 deposit"
+    );
+
+    // Deposit USDC rewards (classic SPL path).
+    env.send(
+        &[ix_deposit_rewards(
+            &admin.pubkey(),
+            &stake_mint,
+            &usdc,
+            &admin_usdc,
+            500_000,
+        )],
+        &[&payer, &admin],
+    )
+    .expect("deposit_rewards ok");
+
+    // Claim USDC (classic SPL transfer out of reward vault).
+    env.send(
+        &[ix_claim_rewards(&user.pubkey(), &stake_mint, &usdc, &user_usdc)],
+        &[&payer, &user],
+    )
+    .expect("claim ok");
+    assert_eq!(env.token_balance(&user_usdc), 500_000);
+
+    // Partial unstake (Token-2022 path back out).
+    env.send(
+        &[ix_unstake_with_program(
+            &user.pubkey(),
+            &stake_mint,
+            &user_stake_ata,
+            400_000_000,
+            &TOKEN_2022_ID,
+        )],
+        &[&payer, &user],
+    )
+    .expect("unstake (token-2022) ok");
+    assert_eq!(env.fetch_pool(&stake_mint).total_staked, 600_000_000);
+    assert_eq!(env.token_balance(&user_stake_ata), 400_000_000);
 }

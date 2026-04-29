@@ -8,6 +8,11 @@ use {
     solana_signer::Signer,
 };
 
+// Anchor custom error codes start at 6000.
+const ERR_UNAUTHORIZED: u32 = 6001;
+const ERR_NOT_PENDING_ADMIN: u32 = 6002;
+const ERR_NO_PENDING_ADMIN: u32 = 6003;
+
 #[test]
 fn initialize_sets_admin_and_usdc_mint() {
     let mut env = Env::new();
@@ -58,7 +63,7 @@ fn admin_rotation_two_step() {
         &[ix_accept_admin(&interloper.pubkey())],
         &[&payer, &interloper],
     );
-    assert!(res.is_err(), "interloper should not be able to accept");
+    assert_error(res, ERR_NOT_PENDING_ADMIN);
 
     // New admin accepts -> takes over.
     env.send(
@@ -102,7 +107,7 @@ fn admin_can_cancel_proposal() {
 
     // After cancel, the previously-proposed admin cannot accept.
     let res = env.send(&[ix_accept_admin(&new_admin.pubkey())], &[&payer, &new_admin]);
-    assert!(res.is_err(), "accept after cancel should fail");
+    assert_error(res, ERR_NO_PENDING_ADMIN);
 }
 
 #[test]
@@ -122,5 +127,26 @@ fn non_admin_cannot_propose() {
         &[ix_propose_admin(&attacker.pubkey(), &attacker.pubkey())],
         &[&payer, &attacker],
     );
-    assert!(res.is_err());
+    assert_error(res, ERR_UNAUTHORIZED);
+}
+
+#[test]
+fn accept_admin_fails_when_no_proposal() {
+    let mut env = Env::new();
+    let usdc = env.create_mint(6);
+    let admin = env.fresh_user(1_000_000_000);
+    let rando = env.fresh_user(1_000_000_000);
+
+    let payer = env.payer.insecure_clone();
+    env.send(
+        &[ix_initialize(&payer.pubkey(), &admin.pubkey(), &usdc)],
+        &[&payer, &admin],
+    )
+    .unwrap();
+
+    let res = env.send(
+        &[ix_accept_admin(&rando.pubkey())],
+        &[&payer, &rando],
+    );
+    assert_error(res, ERR_NO_PENDING_ADMIN);
 }

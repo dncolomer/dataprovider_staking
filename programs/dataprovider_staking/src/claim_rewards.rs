@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
+use anchor_spl::token_interface::{
+    self, Mint, TokenAccount, TokenInterface, TransferChecked,
+};
 
 use crate::constants::{CONFIG_SEED, POOL_SEED, USER_SEED, VAULT_AUTH_SEED};
 use crate::error::ErrorCode;
@@ -10,7 +12,7 @@ use crate::state::{GlobalConfig, TokenPool, UserStake};
 /// 1. Settle: add any newly accrued rewards (since last touch) to
 ///    `pending_rewards`.
 /// 2. Transfer the full `pending_rewards` amount from reward vault to user
-///    USDC ATA.
+///    USDC ATA (transfer_checked for Token-2022 compatibility).
 /// 3. Zero out `pending_rewards` and update counters.
 #[derive(Accounts)]
 pub struct ClaimRewards<'info> {
@@ -22,7 +24,7 @@ pub struct ClaimRewards<'info> {
     )]
     pub config: Box<Account<'info, GlobalConfig>>,
 
-    pub stake_mint: Box<Account<'info, Mint>>,
+    pub stake_mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
         mut,
@@ -36,11 +38,12 @@ pub struct ClaimRewards<'info> {
     #[account(
         mut,
         token::mint = usdc_mint,
+        token::token_program = token_program,
     )]
-    pub reward_vault: Box<Account<'info, TokenAccount>>,
+    pub reward_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(address = config.usdc_mint @ ErrorCode::InvalidRewardMint)]
-    pub usdc_mint: Box<Account<'info, Mint>>,
+    pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// CHECK: vault PDA authority, validated via seeds.
     #[account(
@@ -61,10 +64,12 @@ pub struct ClaimRewards<'info> {
         mut,
         token::mint = usdc_mint,
         token::authority = user,
+        token::token_program = token_program,
     )]
-    pub user_usdc_account: Box<Account<'info, TokenAccount>>,
+    pub user_usdc_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    pub token_program: Program<'info, Token>,
+    /// Token program matching the USDC mint (classic SPL on mainnet today).
+    pub token_program: Interface<'info, TokenInterface>,
 }
 
 pub fn handler(ctx: Context<ClaimRewards>) -> Result<()> {
@@ -85,16 +90,18 @@ pub fn handler(ctx: Context<ClaimRewards>) -> Result<()> {
         &[ctx.accounts.pool.vault_authority_bump],
     ];
     let signer_seeds: &[&[&[u8]]] = &[vault_auth_seeds];
+    let decimals = ctx.accounts.usdc_mint.decimals;
     let cpi_ctx = CpiContext::new_with_signer(
         ctx.accounts.token_program.key(),
-        Transfer {
+        TransferChecked {
             from: ctx.accounts.reward_vault.to_account_info(),
             to: ctx.accounts.user_usdc_account.to_account_info(),
             authority: ctx.accounts.vault_authority.to_account_info(),
+            mint: ctx.accounts.usdc_mint.to_account_info(),
         },
         signer_seeds,
     );
-    token::transfer(cpi_ctx, to_claim)?;
+    token_interface::transfer_checked(cpi_ctx, to_claim, decimals)?;
 
     user_stake.pending_rewards = 0;
     user_stake.total_claimed = user_stake

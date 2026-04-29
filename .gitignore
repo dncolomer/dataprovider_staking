@@ -25,6 +25,9 @@ web/.env.*.local
 wallet-*.json
 admin-*.json
 
+# Any keys directory (admin wallets, backup program keypairs, etc.)
+keys/
+
 # Build-time IDL copies (regenerated from target/idl)
 sdk/idl/*.json
 sdk/src/idl-types.ts

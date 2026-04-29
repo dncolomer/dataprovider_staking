@@ -26,4 +26,6 @@ pub enum ErrorCode {
     InvalidRewardMint,
     #[msg("Stake vault mint does not match the pool's stake mint.")]
     InvalidStakeMint,
+    #[msg("Reward deposit too small to distribute; would round to zero.")]
+    RewardDepositTooSmall,
 }

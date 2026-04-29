@@ -42,14 +42,18 @@ anchor build
 cargo test -p dataprovider_staking --release
 ```
 
-You should see **15/15 tests green**: `test_initialize` (4) and
-`test_staking_flow` (11), covering:
+You should see **26/26 tests green**: `test_initialize` (5) and
+`test_staking_flow` (20), covering:
 
 - initialize sets admin / usdc mint
-- 2-step admin rotation (propose / accept / cancel / interloper rejected)
-- only admin can `add_pool`
+- 2-step admin rotation (propose / accept / cancel / interloper rejected / no-pending rejected)
+- only admin can `add_pool`; 6th pool rejected (`MaxPoolsReached`)
 - stake, partial unstake, full unstake return principal
+- unstake zero rejected (`ZeroAmount`); unstake past balance rejected (`InsufficientStake`)
 - deposits fail when pool has zero stakers
+- zero-amount deposit rejected (`ZeroAmount`)
+- dust deposit (would round to zero) rejected (`RewardDepositTooSmall`)
+- wrong stake vault / wrong reward vault rejected (`InvalidStakeMint` / `InvalidRewardMint`)
 - claim fails when pending == 0
 - single-staker earns 100% of rewards
 - two stakers split rewards 1:3
@@ -57,6 +61,8 @@ You should see **15/15 tests green**: `test_initialize` (4) and
 - unstaking preserves pending rewards for later claim
 - one user staking in multiple pools earns independently per pool
 - adding stake after a deposit does NOT backfill past rewards
+- sequential deposits accumulate correctly
+- `UserStake` PDA reuse after full unstake
 
 ## Local validator end-to-end (optional)
 
@@ -147,23 +153,74 @@ then update `reward_debt` to the new basis. Precision is ample: with
 `u128` accumulator and `1e12` scaling, a pool can absorb ~3.4e26 USDC
 before overflow risk (practically unbounded).
 
-## Deploying to devnet (when you're ready)
+## Deploying to devnet / mainnet
+
+A single script (`scripts/deploy.sh`) handles everything: preflight checks
+(keypair presence & pubkey match, SOL balance, declared program id),
+build, program deploy (payer + upgrade authority = admin wallet),
+`initialize`, and optional `add-pool` for $GHC1CHEM.
+
+### Prereqs
+
+1. Place the admin (`6HGeNL5852ykqQNiwT6sC5YFu1xBBwvgtVnUWuf5EfEP`)
+   keypair at `keys/admin-wallet.json`. The `keys/` directory is
+   gitignored.
+2. Ensure the admin wallet is funded with at least ~3 SOL on the target
+   cluster (program rent ≈ 2.5 SOL + tx fees).
+3. Install deps: `npm install && npm --prefix scripts install`.
+4. Verify tests pass locally: `cargo test -p dataprovider_staking --release`.
+
+### Devnet dry-run (recommended)
 
 ```sh
-# generate a fresh program keypair (once)
-solana-keygen new -o target/deploy/dataprovider_staking-keypair.json
-# update declare_id! in programs/dataprovider_staking/src/lib.rs
-# update [programs.devnet] in Anchor.toml
-anchor build
-anchor deploy --provider.cluster devnet
-# then rotate admin immediately to production admin:
-dps-admin --cluster devnet initialize --usdc-mint <USDC_DEVNET>
-dps-admin --cluster devnet propose-admin --new-admin 6HGeNL5852ykqQNiwT6sC5YFu1xBBwvgtVnUWuf5EfEP
-# (sign accept-admin from the production admin wallet)
+scripts/deploy.sh devnet
 ```
 
-Copy `web/.env.local.example` to `web/.env.local` and flip the NEXT_PUBLIC_*
-values to devnet.
+You'll be prompted for a USDC mint to bake into `GlobalConfig`
+(use a devnet USDC mint or a mock mint you control).
+
+### Mainnet deploy
+
+```sh
+scripts/deploy.sh mainnet-beta
+```
+
+Uses `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` (official USDC) and
+the `3pi9trvC6hrMUHHhQnQy5aAPk5CzxAGxsLyiXzshpump` $GHC1CHEM mint.
+
+### Program IDs
+
+| Env       | Program ID                                       | Keypair file                                      |
+| --------- | ------------------------------------------------ | ------------------------------------------------- |
+| Mainnet   | `94Ja6Y8AuzmZHjQiyk2SzvoysnBr3F17nfHGrHm1idAZ`   | `keys/program-mainnet-keypair.json`               |
+| Devnet    | `AnConH6PVX1UQYtdPgAgUNMowphcragEjbGsx3nQJ6up`   | `target/deploy/dataprovider_staking-devnet-keypair.json` |
+| Localnet  | `94Ja6Y8AuzmZHjQiyk2SzvoysnBr3F17nfHGrHm1idAZ`   | (uses mainnet keypair for `cargo test` loop)      |
+
+### After-deploy checks
+
+```sh
+# Inspect on-chain state
+npm --prefix scripts run cli -- \
+  --cluster mainnet-beta \
+  --keypair keys/admin-wallet.json \
+  --program-id 94Ja6Y8AuzmZHjQiyk2SzvoysnBr3F17nfHGrHm1idAZ \
+  status
+```
+
+### Optional: rotate upgrade authority to a multisig
+
+Once comfortable, move upgrade authority off the hot admin wallet:
+
+```sh
+solana program set-upgrade-authority \
+  94Ja6Y8AuzmZHjQiyk2SzvoysnBr3F17nfHGrHm1idAZ \
+  --keypair keys/admin-wallet.json \
+  --new-upgrade-authority <MULTISIG_PUBKEY> \
+  --url mainnet-beta
+```
+
+Copy `web/.env.local.example` to `web/.env.local` and flip the `NEXT_PUBLIC_*`
+values to your target cluster.
 
 ## Security notes
 

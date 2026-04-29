@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
+use anchor_spl::token_interface::{
+    self, Mint, TokenAccount, TokenInterface, TransferChecked,
+};
 
 use crate::constants::{POOL_SEED, USER_SEED, VAULT_AUTH_SEED};
 use crate::error::ErrorCode;
@@ -9,11 +11,13 @@ use crate::state::{TokenPool, UserStake, ACC_PRECISION};
 /// outstanding rewards into `pending_rewards` first (claim is a separate
 /// instruction so unstake can happen even if the reward vault is temporarily
 /// empty during a bookkeeping window).
+///
+/// Uses `transfer_checked` for Token-2022 compatibility.
 #[derive(Accounts)]
 pub struct Unstake<'info> {
     pub user: Signer<'info>,
 
-    pub stake_mint: Box<Account<'info, Mint>>,
+    pub stake_mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
         mut,
@@ -27,8 +31,9 @@ pub struct Unstake<'info> {
     #[account(
         mut,
         token::mint = stake_mint,
+        token::token_program = token_program,
     )]
-    pub stake_vault: Box<Account<'info, TokenAccount>>,
+    pub stake_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// CHECK: PDA authority for vaults, validated via seeds.
     #[account(
@@ -49,10 +54,11 @@ pub struct Unstake<'info> {
         mut,
         token::mint = stake_mint,
         token::authority = user,
+        token::token_program = token_program,
     )]
-    pub user_token_account: Box<Account<'info, TokenAccount>>,
+    pub user_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
 }
 
 pub fn handler(ctx: Context<Unstake>, amount: u64) -> Result<()> {
@@ -85,16 +91,18 @@ pub fn handler(ctx: Context<Unstake>, amount: u64) -> Result<()> {
         &[ctx.accounts.pool.vault_authority_bump],
     ];
     let signer_seeds: &[&[&[u8]]] = &[vault_auth_seeds];
+    let decimals = ctx.accounts.stake_mint.decimals;
     let cpi_ctx = CpiContext::new_with_signer(
         ctx.accounts.token_program.key(),
-        Transfer {
+        TransferChecked {
             from: ctx.accounts.stake_vault.to_account_info(),
             to: ctx.accounts.user_token_account.to_account_info(),
             authority: ctx.accounts.vault_authority.to_account_info(),
+            mint: ctx.accounts.stake_mint.to_account_info(),
         },
         signer_seeds,
     );
-    token::transfer(cpi_ctx, amount)?;
+    token_interface::transfer_checked(cpi_ctx, amount, decimals)?;
 
     let pool = &mut ctx.accounts.pool;
     pool.total_staked = pool

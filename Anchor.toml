@@ -13,10 +13,13 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-dataprovider_staking = "GyZKxaZaLZtKLes5JgJfEHZUBhrtuMgTNtuLiEU59Bqd"
+dataprovider_staking = "94Ja6Y8AuzmZHjQiyk2SzvoysnBr3F17nfHGrHm1idAZ"
 
 [programs.devnet]
 dataprovider_staking = "AnConH6PVX1UQYtdPgAgUNMowphcragEjbGsx3nQJ6up"
+
+[programs.mainnet]
+dataprovider_staking = "94Ja6Y8AuzmZHjQiyk2SzvoysnBr3F17nfHGrHm1idAZ"
 
 [provider]
 cluster = "localnet"

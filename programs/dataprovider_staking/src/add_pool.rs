@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{Mint, Token, TokenAccount};
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::constants::{CONFIG_SEED, POOL_SEED, VAULT_AUTH_SEED};
 use crate::error::ErrorCode;
@@ -8,15 +8,22 @@ use crate::state::{GlobalConfig, TokenPool, MAX_POOLS};
 /// Admin-only: register a new stake mint and create its stake + reward vaults.
 ///
 /// Each pool has:
-///   - a `stake_vault` (an SPL TokenAccount for `stake_mint`) owned by the
-///     pool's `vault_authority` PDA, which holds all staked tokens.
-///   - a `reward_vault` (an SPL TokenAccount for `usdc_mint`) also owned by
-///     the same `vault_authority` PDA, which receives USDC deposits from the
-///     admin and is the source users claim from.
+///   - a `stake_vault` (a TokenAccount for `stake_mint`) owned by the pool's
+///     `vault_authority` PDA. Uses the same token program as the stake mint
+///     (classic SPL or Token-2022), so Token-2022 mints like $GHC1CHEM are
+///     supported natively.
+///   - a `reward_vault` (a TokenAccount for `usdc_mint`) also owned by the
+///     same `vault_authority` PDA, funded by the admin and claimed by users.
 ///
 /// The `vault_authority` is derived as [VAULT_AUTH_SEED, stake_mint] and never
 /// holds non-token state directly. Ownership by a PDA means only this program
 /// (via CPI with the correct seeds) can move funds out of the vaults.
+///
+/// IMPORTANT: the caller MUST pass the token program matching `stake_mint`'s
+/// owner. Anchor's `InterfaceAccount<Mint>` accepts either SPL Token or
+/// Token-2022, and `Interface<TokenInterface>` resolves the matching program
+/// at CPI time. We do the same for USDC, but since USDC has a single known
+/// program today, we put it on the same interface for consistency.
 #[derive(Accounts)]
 pub struct AddPool<'info> {
     #[account(mut)]
@@ -33,11 +40,11 @@ pub struct AddPool<'info> {
 
     pub admin: Signer<'info>,
 
-    pub stake_mint: Box<Account<'info, Mint>>,
+    pub stake_mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// USDC mint; must match the one recorded at `initialize`.
     #[account(address = config.usdc_mint @ ErrorCode::InvalidRewardMint)]
-    pub usdc_mint: Box<Account<'info, Mint>>,
+    pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
         init,
@@ -62,22 +69,28 @@ pub struct AddPool<'info> {
         payer = payer,
         token::mint = stake_mint,
         token::authority = vault_authority,
+        token::token_program = stake_token_program,
         seeds = [b"stake_vault", stake_mint.key().as_ref()],
         bump,
     )]
-    pub stake_vault: Box<Account<'info, TokenAccount>>,
+    pub stake_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         init,
         payer = payer,
         token::mint = usdc_mint,
         token::authority = vault_authority,
+        token::token_program = usdc_token_program,
         seeds = [b"reward_vault", stake_mint.key().as_ref()],
         bump,
     )]
-    pub reward_vault: Box<Account<'info, TokenAccount>>,
+    pub reward_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    pub token_program: Program<'info, Token>,
+    /// Token program matching the `stake_mint` owner (SPL Token or Token-2022).
+    pub stake_token_program: Interface<'info, TokenInterface>,
+    /// Token program matching the `usdc_mint` owner (SPL Token or Token-2022).
+    /// Usually classic SPL Token for mainnet USDC.
+    pub usdc_token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
 }

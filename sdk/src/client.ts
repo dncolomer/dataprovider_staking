@@ -15,6 +15,7 @@ import {
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import {
@@ -89,6 +90,41 @@ function bnToBigint(v: BN | bigint | number): bigint {
   if (typeof v === "bigint") return v;
   if (typeof v === "number") return BigInt(v);
   return BigInt(v.toString());
+}
+
+/**
+ * Look up which SPL token program owns a given mint (classic SPL Token vs
+ * Token-2022). Returns the program id to pass as `tokenProgram` on any
+ * instruction touching that mint.
+ */
+export async function resolveMintTokenProgram(
+  connection: Connection,
+  mint: PublicKey,
+): Promise<PublicKey> {
+  const info = await connection.getAccountInfo(mint);
+  if (!info) throw new Error(`Mint ${mint.toBase58()} not found`);
+  if (info.owner.equals(TOKEN_2022_PROGRAM_ID)) return TOKEN_2022_PROGRAM_ID;
+  if (info.owner.equals(TOKEN_PROGRAM_ID)) return TOKEN_PROGRAM_ID;
+  throw new Error(
+    `Mint ${mint.toBase58()} is owned by ${info.owner.toBase58()}, which is neither SPL Token nor Token-2022`,
+  );
+}
+
+/**
+ * Synchronous variant of {@link getAssociatedTokenAddressSync} that picks the
+ * correct associated-token program for the given token program id.
+ */
+export function ataForTokenProgram(
+  mint: PublicKey,
+  owner: PublicKey,
+  tokenProgram: PublicKey,
+): PublicKey {
+  return getAssociatedTokenAddressSync(
+    mint,
+    owner,
+    true, // allowOwnerOffCurve: true so PDAs work; harmless for regular owners
+    tokenProgram,
+  );
 }
 
 /**
@@ -261,12 +297,26 @@ export class StakingClient {
   /**
    * Build an `add_pool` instruction. The caller must pass the USDC mint that
    * matches `GlobalConfig.usdc_mint`; use `fetchConfig()` to obtain it.
+   *
+   * Optionally pass `stakeTokenProgram` / `usdcTokenProgram` to bypass the
+   * on-chain lookup for the mint's owning program. Defaults (when omitted)
+   * are resolved via `resolveMintTokenProgram`.
    */
-  addPoolIx(
+  async addPoolIx(
     admin: PublicKey,
     stakeMint: PublicKey,
     usdcMint: PublicKey,
+    opts: {
+      stakeTokenProgram?: PublicKey;
+      usdcTokenProgram?: PublicKey;
+    } = {},
   ): Promise<TransactionInstruction> {
+    const stakeTokenProgram =
+      opts.stakeTokenProgram ??
+      (await resolveMintTokenProgram(this.provider.connection, stakeMint));
+    const usdcTokenProgram =
+      opts.usdcTokenProgram ??
+      (await resolveMintTokenProgram(this.provider.connection, usdcMint));
     return this.program.methods
       .addPool()
       .accountsPartial({
@@ -274,49 +324,65 @@ export class StakingClient {
         admin,
         stakeMint,
         usdcMint,
+        stakeTokenProgram,
+        usdcTokenProgram,
       })
       .instruction();
   }
 
-  stakeIx(
+  async stakeIx(
     user: PublicKey,
     stakeMint: PublicKey,
     amount: bigint | number | BN,
+    opts: { tokenProgram?: PublicKey } = {},
   ): Promise<TransactionInstruction> {
-    const userAta = getAssociatedTokenAddressSync(stakeMint, user);
+    const tokenProgram =
+      opts.tokenProgram ??
+      (await resolveMintTokenProgram(this.provider.connection, stakeMint));
+    const userAta = ataForTokenProgram(stakeMint, user, tokenProgram);
     return this.program.methods
       .stake(new BN(amount.toString()))
       .accountsPartial({
         user,
         stakeMint,
         userTokenAccount: userAta,
+        tokenProgram,
       })
       .instruction();
   }
 
-  unstakeIx(
+  async unstakeIx(
     user: PublicKey,
     stakeMint: PublicKey,
     amount: bigint | number | BN,
+    opts: { tokenProgram?: PublicKey } = {},
   ): Promise<TransactionInstruction> {
-    const userAta = getAssociatedTokenAddressSync(stakeMint, user);
+    const tokenProgram =
+      opts.tokenProgram ??
+      (await resolveMintTokenProgram(this.provider.connection, stakeMint));
+    const userAta = ataForTokenProgram(stakeMint, user, tokenProgram);
     return this.program.methods
       .unstake(new BN(amount.toString()))
       .accountsPartial({
         user,
         stakeMint,
         userTokenAccount: userAta,
+        tokenProgram,
       })
       .instruction();
   }
 
-  depositRewardsIx(
+  async depositRewardsIx(
     admin: PublicKey,
     stakeMint: PublicKey,
     usdcMint: PublicKey,
     amount: bigint | number | BN,
+    opts: { tokenProgram?: PublicKey } = {},
   ): Promise<TransactionInstruction> {
-    const adminUsdc = getAssociatedTokenAddressSync(usdcMint, admin);
+    const tokenProgram =
+      opts.tokenProgram ??
+      (await resolveMintTokenProgram(this.provider.connection, usdcMint));
+    const adminUsdc = ataForTokenProgram(usdcMint, admin, tokenProgram);
     return this.program.methods
       .depositRewards(new BN(amount.toString()))
       .accountsPartial({
@@ -324,16 +390,21 @@ export class StakingClient {
         stakeMint,
         usdcMint,
         adminUsdcAccount: adminUsdc,
+        tokenProgram,
       })
       .instruction();
   }
 
-  claimRewardsIx(
+  async claimRewardsIx(
     user: PublicKey,
     stakeMint: PublicKey,
     usdcMint: PublicKey,
+    opts: { tokenProgram?: PublicKey } = {},
   ): Promise<TransactionInstruction> {
-    const userUsdc = getAssociatedTokenAddressSync(usdcMint, user);
+    const tokenProgram =
+      opts.tokenProgram ??
+      (await resolveMintTokenProgram(this.provider.connection, usdcMint));
+    const userUsdc = ataForTokenProgram(usdcMint, user, tokenProgram);
     return this.program.methods
       .claimRewards()
       .accountsPartial({
@@ -341,6 +412,7 @@ export class StakingClient {
         stakeMint,
         usdcMint,
         userUsdcAccount: userUsdc,
+        tokenProgram,
       })
       .instruction();
   }
@@ -382,46 +454,75 @@ export class StakingClient {
     admin: PublicKey,
     stakeMint: PublicKey,
     usdcMint: PublicKey,
+    opts: {
+      stakeTokenProgram?: PublicKey;
+      usdcTokenProgram?: PublicKey;
+    } = {},
   ): Promise<string> {
+    const stakeTokenProgram =
+      opts.stakeTokenProgram ??
+      (await resolveMintTokenProgram(this.provider.connection, stakeMint));
+    const usdcTokenProgram =
+      opts.usdcTokenProgram ??
+      (await resolveMintTokenProgram(this.provider.connection, usdcMint));
     return this.program.methods
       .addPool()
-      .accountsPartial({ payer: this.provider.publicKey!, admin, stakeMint, usdcMint })
+      .accountsPartial({
+        payer: this.provider.publicKey!,
+        admin,
+        stakeMint,
+        usdcMint,
+        stakeTokenProgram,
+        usdcTokenProgram,
+      })
       .rpc();
   }
 
   async stakeAndSend(
     stakeMint: PublicKey,
     amount: bigint | number | BN,
+    opts: { tokenProgram?: PublicKey } = {},
   ): Promise<string> {
     const user = this.provider.publicKey!;
-    const userAta = getAssociatedTokenAddressSync(stakeMint, user);
+    const tokenProgram =
+      opts.tokenProgram ??
+      (await resolveMintTokenProgram(this.provider.connection, stakeMint));
+    const userAta = ataForTokenProgram(stakeMint, user, tokenProgram);
     return this.program.methods
       .stake(new BN(amount.toString()))
-      .accountsPartial({ user, stakeMint, userTokenAccount: userAta })
+      .accountsPartial({ user, stakeMint, userTokenAccount: userAta, tokenProgram })
       .rpc();
   }
 
   async unstakeAndSend(
     stakeMint: PublicKey,
     amount: bigint | number | BN,
+    opts: { tokenProgram?: PublicKey } = {},
   ): Promise<string> {
     const user = this.provider.publicKey!;
-    const userAta = getAssociatedTokenAddressSync(stakeMint, user);
+    const tokenProgram =
+      opts.tokenProgram ??
+      (await resolveMintTokenProgram(this.provider.connection, stakeMint));
+    const userAta = ataForTokenProgram(stakeMint, user, tokenProgram);
     return this.program.methods
       .unstake(new BN(amount.toString()))
-      .accountsPartial({ user, stakeMint, userTokenAccount: userAta })
+      .accountsPartial({ user, stakeMint, userTokenAccount: userAta, tokenProgram })
       .rpc();
   }
 
   async claimRewardsAndSend(
     stakeMint: PublicKey,
     usdcMint: PublicKey,
+    opts: { tokenProgram?: PublicKey } = {},
   ): Promise<string> {
     const user = this.provider.publicKey!;
-    const userUsdc = getAssociatedTokenAddressSync(usdcMint, user);
+    const tokenProgram =
+      opts.tokenProgram ??
+      (await resolveMintTokenProgram(this.provider.connection, usdcMint));
+    const userUsdc = ataForTokenProgram(usdcMint, user, tokenProgram);
     return this.program.methods
       .claimRewards()
-      .accountsPartial({ user, stakeMint, usdcMint, userUsdcAccount: userUsdc })
+      .accountsPartial({ user, stakeMint, usdcMint, userUsdcAccount: userUsdc, tokenProgram })
       .rpc();
   }
 
@@ -429,17 +530,22 @@ export class StakingClient {
     stakeMint: PublicKey,
     usdcMint: PublicKey,
     amount: bigint | number | BN,
+    opts: { tokenProgram?: PublicKey } = {},
   ): Promise<string> {
     const admin = this.provider.publicKey!;
-    const adminUsdc = getAssociatedTokenAddressSync(usdcMint, admin);
+    const tokenProgram =
+      opts.tokenProgram ??
+      (await resolveMintTokenProgram(this.provider.connection, usdcMint));
+    const adminUsdc = ataForTokenProgram(usdcMint, admin, tokenProgram);
     return this.program.methods
       .depositRewards(new BN(amount.toString()))
-      .accountsPartial({ admin, stakeMint, usdcMint, adminUsdcAccount: adminUsdc })
+      .accountsPartial({ admin, stakeMint, usdcMint, adminUsdcAccount: adminUsdc, tokenProgram })
       .rpc();
   }
 
   // Expose a few helpers that callers sometimes need inline.
   static readonly TOKEN_PROGRAM_ID = TOKEN_PROGRAM_ID;
+  static readonly TOKEN_2022_PROGRAM_ID = TOKEN_2022_PROGRAM_ID;
   static readonly ASSOCIATED_TOKEN_PROGRAM_ID = ASSOCIATED_TOKEN_PROGRAM_ID;
   static readonly SYSTEM_PROGRAM_ID = SystemProgram.programId;
   static readonly RENT_SYSVAR = SYSVAR_RENT_PUBKEY;
