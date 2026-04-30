@@ -69,30 +69,44 @@ export default function HomePage() {
 
         <section className="hero">
           <h1 className="hero__title">
-            Stake tokens, earn <span className="accent">USDC</span>&nbsp;dividends.
+            Stake data-provider tokens, earn{" "}
+            <span className="accent">USDC</span>&nbsp;revenue.
           </h1>
           <p className="hero__copy">
-            A non-custodial, multi-mint staking protocol on Solana. The admin
-            periodically distributes USDC revenue pro-rata to stakers. Classic
-            MasterChef-style accounting, Token-2022 compatible, fully
-            open-source.
+            Data providers submit high-quality, attributable data to the{" "}
+            <strong>GHC dataset</strong>. Revenue generated from that data —
+            AI training licenses, dataset sales, and other usage — is
+            distributed pro-rata to the people who stake the provider&apos;s
+            token. 80% to the provider&apos;s stakers, 20% to{" "}
+            <strong>$UNSYS</strong> buybacks.
+          </p>
+          <p className="hero__copy" style={{ fontSize: "0.9rem" }}>
+            This is the on-chain settlement layer for the{" "}
+            <a
+              href="https://uncertain.systems/data-providers"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Uncertain Systems Data Provider Program
+            </a>
+            . Non-custodial, open-source, Token-2022 compatible.
           </p>
           <p className="hero__byline">
-            Part of the{" "}
+            A part of the{" "}
             <a
-              href="https://uncertainsystems.xyz"
+              href="https://uncertain.systems"
               target="_blank"
               rel="noopener noreferrer"
             >
               Uncertain Systems
             </a>{" "}
-            research program &middot;{" "}
+            ecosystem &middot;{" "}
             <a
               href="https://github.com/dncolomer/dataprovider_staking"
               target="_blank"
               rel="noopener noreferrer"
             >
-              view source on GitHub
+              source on GitHub
             </a>
           </p>
         </section>
