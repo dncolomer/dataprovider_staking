@@ -146,6 +146,25 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
       });
       return;
     }
+    // Pre-flight: the program requires user_token_account to be an
+    // initialized SPL TokenAccount owned by the user. If the user has
+    // never held this mint, that ATA doesn't exist and the on-chain tx
+    // would fail with AccountNotInitialized (3012). Surface it as a
+    // friendly message instead of a cryptic anchor error.
+    if (userBalance == null || userBalance === 0n) {
+      setStatus({
+        kind: "err",
+        msg: `You don't hold any of this token yet. Acquire ${pool.stakeMint.toBase58().slice(0, 4)}… first, then come back to stake.`,
+      });
+      return;
+    }
+    if (amt > userBalance) {
+      setStatus({
+        kind: "err",
+        msg: `Amount exceeds your wallet balance (${fmt(userBalance, decimals)}).`,
+      });
+      return;
+    }
     await withBusy("staked", () => client.stakeAndSend(pool.stakeMint, amt));
     setStakeInput("");
   }
@@ -221,16 +240,25 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
 
       {user && decimals != null && (
         <>
+          {userBalance === 0n && (
+            <p className="muted" style={{ marginBottom: 8 }}>
+              You don&apos;t hold any of this token yet. Acquire it first to
+              stake.
+            </p>
+          )}
           <form className="row" onSubmit={onStake} style={{ marginBottom: 8 }}>
             <input
               type="text"
               placeholder="amount to stake"
               value={stakeInput}
               onChange={(e) => setStakeInput(e.target.value)}
-              disabled={busy}
+              disabled={busy || userBalance === 0n}
               inputMode="decimal"
             />
-            <button disabled={busy || !stakeInput} type="submit">
+            <button
+              disabled={busy || !stakeInput || userBalance === 0n}
+              type="submit"
+            >
               Stake
             </button>
           </form>
@@ -240,12 +268,17 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
               placeholder="amount to unstake"
               value={unstakeInput}
               onChange={(e) => setUnstakeInput(e.target.value)}
-              disabled={busy}
+              disabled={busy || !userStake || userStake.amount === 0n}
               inputMode="decimal"
             />
             <button
               className="secondary"
-              disabled={busy || !unstakeInput}
+              disabled={
+                busy ||
+                !unstakeInput ||
+                !userStake ||
+                userStake.amount === 0n
+              }
               type="submit"
             >
               Unstake
