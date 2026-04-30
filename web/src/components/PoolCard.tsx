@@ -43,24 +43,31 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
     if (!client) return;
     let cancelled = false;
     (async () => {
-      // Resolve the mint's owning token program (classic SPL vs Token-2022)
-      // so we derive the right ATA for the "Wallet balance" display. The
-      // SDK's stake/unstake calls do the same auto-detection internally.
+      // First, resolve the mint's owning token program (classic SPL vs
+      // Token-2022) — getMint() defaults to classic SPL and throws on
+      // Token-2022 mints, which would leave decimals=null and break staking.
       let tokenProgram: PublicKey | null = null;
-      try {
-        const mint = await getMint(client.provider.connection, pool.stakeMint);
-        if (cancelled) return;
-        setDecimals(mint.decimals);
-      } catch {
-        /* ignore */
-      }
       try {
         tokenProgram = await resolveMintTokenProgram(
           client.provider.connection,
           pool.stakeMint,
         );
       } catch {
-        /* ignore; leave balance as null */
+        /* leave null; we'll just not load decimals/balance */
+      }
+      if (tokenProgram) {
+        try {
+          const mint = await getMint(
+            client.provider.connection,
+            pool.stakeMint,
+            undefined,
+            tokenProgram,
+          );
+          if (cancelled) return;
+          setDecimals(mint.decimals);
+        } catch {
+          /* ignore */
+        }
       }
       if (user) {
         const us = await client.fetchUserStake(pool.stakeMint, user);
@@ -129,14 +136,32 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
   async function onStake(e: FormEvent) {
     e.preventDefault();
     if (!client) return;
-    const amt = parseAmount(stakeInput, decimals);
+    let amt: bigint;
+    try {
+      amt = parseAmount(stakeInput, decimals);
+    } catch (err) {
+      setStatus({
+        kind: "err",
+        msg: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
     await withBusy("staked", () => client.stakeAndSend(pool.stakeMint, amt));
     setStakeInput("");
   }
   async function onUnstake(e: FormEvent) {
     e.preventDefault();
     if (!client) return;
-    const amt = parseAmount(unstakeInput, decimals);
+    let amt: bigint;
+    try {
+      amt = parseAmount(unstakeInput, decimals);
+    } catch (err) {
+      setStatus({
+        kind: "err",
+        msg: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
     await withBusy("unstaked", () =>
       client.unstakeAndSend(pool.stakeMint, amt),
     );
@@ -190,7 +215,11 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
 
       {!user && <p className="muted">Connect a wallet to stake.</p>}
 
-      {user && (
+      {user && decimals == null && (
+        <p className="muted">Loading pool mint info…</p>
+      )}
+
+      {user && decimals != null && (
         <>
           <form className="row" onSubmit={onStake} style={{ marginBottom: 8 }}>
             <input
@@ -199,6 +228,7 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
               value={stakeInput}
               onChange={(e) => setStakeInput(e.target.value)}
               disabled={busy}
+              inputMode="decimal"
             />
             <button disabled={busy || !stakeInput} type="submit">
               Stake
@@ -211,6 +241,7 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
               value={unstakeInput}
               onChange={(e) => setUnstakeInput(e.target.value)}
               disabled={busy}
+              inputMode="decimal"
             />
             <button
               className="secondary"
