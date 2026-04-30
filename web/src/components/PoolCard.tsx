@@ -9,7 +9,15 @@ import {
 } from "@dataprovider/staking-sdk";
 import { getMint } from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
+import Image from "next/image";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { brandFor } from "../lib/brands";
+import {
+  formatAmount,
+  parseAmount,
+  shortAddress,
+  toDecimalString,
+} from "../lib/format";
 import { useStakingClient } from "../lib/useStakingClient";
 
 interface Props {
@@ -21,12 +29,20 @@ interface Props {
 }
 
 /**
- * Renders one pool: stats + stake/unstake/claim forms. All three actions
- * settle pending rewards on-chain, so after any of them we re-trigger the
- * parent's refresh via `onAction`.
+ * One-pool dashboard card: branded header, headline stats, stake/unstake/claim.
+ * Auto-detects the stake mint's token program (SPL vs Token-2022) so it
+ * handles both.
  */
-export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props) {
+export function PoolCard({
+  pool,
+  usdcMint,
+  usdcDecimals,
+  user,
+  onAction,
+}: Props) {
   const client = useStakingClient();
+  const brand = brandFor(pool.stakeMint.toBase58());
+
   const [decimals, setDecimals] = useState<number | null>(null);
   const [userStake, setUserStake] = useState<UserStakeData | null>(null);
   const [userBalance, setUserBalance] = useState<bigint | null>(null);
@@ -37,15 +53,13 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
     msg: string;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  // Load stake-mint decimals and the user's stake/balance.
+  // Load stake-mint decimals, token program, and the user's stake/balance.
   useEffect(() => {
     if (!client) return;
     let cancelled = false;
     (async () => {
-      // First, resolve the mint's owning token program (classic SPL vs
-      // Token-2022) — getMint() defaults to classic SPL and throws on
-      // Token-2022 mints, which would leave decimals=null and break staking.
       let tokenProgram: PublicKey | null = null;
       try {
         tokenProgram = await resolveMintTokenProgram(
@@ -53,7 +67,7 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
           pool.stakeMint,
         );
       } catch {
-        /* leave null; we'll just not load decimals/balance */
+        /* leave null */
       }
       if (tokenProgram) {
         try {
@@ -75,9 +89,8 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
         try {
           if (!tokenProgram) throw new Error("no token program resolved");
           const ata = ataForTokenProgram(pool.stakeMint, user, tokenProgram);
-          const acc = await client.provider.connection.getTokenAccountBalance(
-            ata,
-          );
+          const acc =
+            await client.provider.connection.getTokenAccountBalance(ata);
           if (!cancelled) setUserBalance(BigInt(acc.value.amount));
         } catch {
           if (!cancelled) setUserBalance(0n);
@@ -99,23 +112,14 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
     return userStake.pendingRewards + accrued;
   }, [userStake, pool.accRewardPerShare]);
 
-  function fmt(raw: bigint, d: number | null): string {
+  /** Safe token amount formatter; falls back to raw if decimals unknown. */
+  function fmtToken(raw: bigint, d: number | null): string {
     if (d == null) return raw.toString();
-    const base = 10n ** BigInt(d);
-    const whole = raw / base;
-    const frac = raw % base;
-    return d === 0
-      ? whole.toString()
-      : `${whole}.${frac.toString().padStart(d, "0").replace(/0+$/, "") || "0"}`;
+    return formatAmount(raw, d);
   }
-
-  function parseAmount(s: string, d: number | null): bigint {
-    if (!d && d !== 0) throw new Error("decimals unknown");
-    const [w, f = ""] = s.trim().split(".");
-    const padded = (f + "0".repeat(d)).slice(0, d);
-    const raw = BigInt(w || "0") * 10n ** BigInt(d) + BigInt(padded || "0");
-    if (raw <= 0n) throw new Error("amount must be positive");
-    return raw;
+  /** USDC-specific formatter (always 2 fractional). */
+  function fmtUsdc(raw: bigint): string {
+    return formatAmount(raw, usdcDecimals, { maxFraction: 2, minFraction: 2 });
   }
 
   async function withBusy(label: string, fn: () => Promise<string>) {
@@ -123,7 +127,10 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
     setBusy(true);
     try {
       const sig = await fn();
-      setStatus({ kind: "ok", msg: `${label} ok (${sig.slice(0, 12)}…)` });
+      setStatus({
+        kind: "ok",
+        msg: `${label} ok · ${sig.slice(0, 8)}…`,
+      });
       onAction();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -136,6 +143,7 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
   async function onStake(e: FormEvent) {
     e.preventDefault();
     if (!client) return;
+    if (decimals == null) return;
     let amt: bigint;
     try {
       amt = parseAmount(stakeInput, decimals);
@@ -146,31 +154,28 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
       });
       return;
     }
-    // Pre-flight: the program requires user_token_account to be an
-    // initialized SPL TokenAccount owned by the user. If the user has
-    // never held this mint, that ATA doesn't exist and the on-chain tx
-    // would fail with AccountNotInitialized (3012). Surface it as a
-    // friendly message instead of a cryptic anchor error.
     if (userBalance == null || userBalance === 0n) {
       setStatus({
         kind: "err",
-        msg: `You don't hold any of this token yet. Acquire ${pool.stakeMint.toBase58().slice(0, 4)}… first, then come back to stake.`,
+        msg: `You don't hold any ${brand.symbol} yet. Acquire some first to stake.`,
       });
       return;
     }
     if (amt > userBalance) {
       setStatus({
         kind: "err",
-        msg: `Amount exceeds your wallet balance (${fmt(userBalance, decimals)}).`,
+        msg: `Amount exceeds your wallet balance (${fmtToken(userBalance, decimals)} ${brand.symbol}).`,
       });
       return;
     }
     await withBusy("staked", () => client.stakeAndSend(pool.stakeMint, amt));
     setStakeInput("");
   }
+
   async function onUnstake(e: FormEvent) {
     e.preventDefault();
     if (!client) return;
+    if (decimals == null) return;
     let amt: bigint;
     try {
       amt = parseAmount(unstakeInput, decimals);
@@ -186,6 +191,7 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
     );
     setUnstakeInput("");
   }
+
   async function onClaim() {
     if (!client) return;
     await withBusy("claimed", () =>
@@ -193,101 +199,199 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
     );
   }
 
+  function setStakeMax() {
+    if (userBalance == null || decimals == null) return;
+    setStakeInput(toDecimalString(userBalance, decimals));
+  }
+  function setUnstakeMax() {
+    if (!userStake || decimals == null) return;
+    setUnstakeInput(toDecimalString(userStake.amount, decimals));
+  }
+
+  async function copyMint() {
+    try {
+      await navigator.clipboard.writeText(pool.stakeMint.toBase58());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  }
+
   return (
-    <section className="card">
-      <div className="pool-header">
-        <div className="pool-title">Pool</div>
-        <div className="mono muted">{pool.stakeMint.toBase58()}</div>
-      </div>
-      <div className="stat-grid">
-        <div className="stat">
-          <span className="label">Total staked</span>
-          <span className="value">{fmt(pool.totalStaked, decimals)}</span>
-        </div>
-        <div className="stat">
-          <span className="label">Rewards paid in</span>
-          <span className="value">
-            {fmt(pool.totalRewardsDeposited, usdcDecimals)} USDC
-          </span>
-        </div>
-        <div className="stat">
-          <span className="label">Rewards claimed</span>
-          <span className="value">
-            {fmt(pool.totalRewardsClaimed, usdcDecimals)} USDC
-          </span>
-        </div>
-        <div className="stat">
-          <span className="label">Your stake</span>
-          <span className="value">
-            {fmt(userStake?.amount ?? 0n, decimals)}
-          </span>
-        </div>
-        <div className="stat">
-          <span className="label">Your claimable</span>
-          <span className="value">{fmt(claimable, usdcDecimals)} USDC</span>
-        </div>
-        <div className="stat">
-          <span className="label">Wallet balance</span>
-          <span className="value">{fmt(userBalance ?? 0n, decimals)}</span>
+    <section className="card pool-card">
+      <div className="pool-head">
+        <div className="pool-identity">
+          {brand.logo ? (
+            <Image
+              src={brand.logo}
+              alt={`${brand.symbol} logo`}
+              width={56}
+              height={56}
+              className="pool-logo"
+              priority
+            />
+          ) : (
+            <div className="pool-logo pool-logo--placeholder">
+              {brand.symbol.slice(0, 2)}
+            </div>
+          )}
+          <div className="pool-meta">
+            <div className="pool-title">{brand.name}</div>
+            {brand.tagline && (
+              <div className="pool-tagline">{brand.tagline}</div>
+            )}
+            <button
+              className="mint-chip"
+              onClick={copyMint}
+              title="Copy mint address"
+              type="button"
+            >
+              <span className="mono">
+                {shortAddress(pool.stakeMint.toBase58(), 4, 4)}
+              </span>
+              <span className="mint-chip__action">
+                {copied ? "copied" : "copy"}
+              </span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {!user && <p className="muted">Connect a wallet to stake.</p>}
+      <div className="stat-grid">
+        <Stat
+          label="Total staked"
+          value={fmtToken(pool.totalStaked, decimals)}
+          unit={brand.symbol}
+        />
+        <Stat
+          label="Rewards paid in"
+          value={fmtUsdc(pool.totalRewardsDeposited)}
+          unit="USDC"
+          accent
+        />
+        <Stat
+          label="Rewards claimed"
+          value={fmtUsdc(pool.totalRewardsClaimed)}
+          unit="USDC"
+        />
+        <Stat
+          label="Your stake"
+          value={fmtToken(userStake?.amount ?? 0n, decimals)}
+          unit={brand.symbol}
+          muted={!user || (userStake?.amount ?? 0n) === 0n}
+        />
+        <Stat
+          label="Your claimable"
+          value={fmtUsdc(claimable)}
+          unit="USDC"
+          accent={claimable > 0n}
+          muted={!user}
+        />
+        <Stat
+          label="Wallet balance"
+          value={fmtToken(userBalance ?? 0n, decimals)}
+          unit={brand.symbol}
+          muted={!user}
+        />
+      </div>
+
+      {!user && (
+        <p className="muted pool-hint">Connect a wallet to stake.</p>
+      )}
 
       {user && decimals == null && (
-        <p className="muted">Loading pool mint info…</p>
+        <p className="muted pool-hint">Loading pool mint info…</p>
       )}
 
       {user && decimals != null && (
         <>
           {userBalance === 0n && (
-            <p className="muted" style={{ marginBottom: 8 }}>
-              You don&apos;t hold any of this token yet. Acquire it first to
+            <p className="muted pool-hint">
+              You don&apos;t hold any {brand.symbol} yet. Acquire some first to
               stake.
             </p>
           )}
-          <form className="row" onSubmit={onStake} style={{ marginBottom: 8 }}>
-            <input
-              type="text"
-              placeholder="amount to stake"
-              value={stakeInput}
-              onChange={(e) => setStakeInput(e.target.value)}
-              disabled={busy || userBalance === 0n}
-              inputMode="decimal"
-            />
-            <button
-              disabled={busy || !stakeInput || userBalance === 0n}
-              type="submit"
-            >
-              Stake
-            </button>
-          </form>
-          <form className="row" onSubmit={onUnstake} style={{ marginBottom: 8 }}>
-            <input
-              type="text"
-              placeholder="amount to unstake"
-              value={unstakeInput}
-              onChange={(e) => setUnstakeInput(e.target.value)}
-              disabled={busy || !userStake || userStake.amount === 0n}
-              inputMode="decimal"
-            />
-            <button
-              className="secondary"
-              disabled={
-                busy ||
-                !unstakeInput ||
-                !userStake ||
-                userStake.amount === 0n
-              }
-              type="submit"
-            >
-              Unstake
-            </button>
-          </form>
-          <div className="row">
-            <button disabled={busy || claimable <= 0n} onClick={onClaim}>
-              Claim {fmt(claimable, usdcDecimals)} USDC
-            </button>
+
+          <div className="actions">
+            <form className="action" onSubmit={onStake}>
+              <label className="action__label">Stake</label>
+              <div className="action__input-row">
+                <input
+                  type="text"
+                  placeholder={`amount in ${brand.symbol}`}
+                  value={stakeInput}
+                  onChange={(e) => setStakeInput(e.target.value)}
+                  disabled={busy || userBalance === 0n}
+                  inputMode="decimal"
+                />
+                <button
+                  type="button"
+                  className="chip"
+                  onClick={setStakeMax}
+                  disabled={busy || (userBalance ?? 0n) === 0n}
+                >
+                  max
+                </button>
+                <button
+                  disabled={busy || !stakeInput || userBalance === 0n}
+                  type="submit"
+                >
+                  Stake
+                </button>
+              </div>
+            </form>
+
+            <form className="action" onSubmit={onUnstake}>
+              <label className="action__label">Unstake</label>
+              <div className="action__input-row">
+                <input
+                  type="text"
+                  placeholder={`amount in ${brand.symbol}`}
+                  value={unstakeInput}
+                  onChange={(e) => setUnstakeInput(e.target.value)}
+                  disabled={
+                    busy || !userStake || userStake.amount === 0n
+                  }
+                  inputMode="decimal"
+                />
+                <button
+                  type="button"
+                  className="chip"
+                  onClick={setUnstakeMax}
+                  disabled={
+                    busy || !userStake || userStake.amount === 0n
+                  }
+                >
+                  max
+                </button>
+                <button
+                  className="secondary"
+                  disabled={
+                    busy ||
+                    !unstakeInput ||
+                    !userStake ||
+                    userStake.amount === 0n
+                  }
+                  type="submit"
+                >
+                  Unstake
+                </button>
+              </div>
+            </form>
+
+            <div className="action">
+              <label className="action__label">Rewards</label>
+              <button
+                className="claim-btn"
+                disabled={busy || claimable <= 0n}
+                onClick={onClaim}
+              >
+                {claimable > 0n
+                  ? `Claim ${fmtUsdc(claimable)} USDC`
+                  : "No rewards to claim"}
+              </button>
+            </div>
           </div>
         </>
       )}
@@ -298,5 +402,37 @@ export function PoolCard({ pool, usdcMint, usdcDecimals, user, onAction }: Props
         </div>
       )}
     </section>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  unit,
+  accent = false,
+  muted = false,
+}: {
+  label: string;
+  value: string;
+  unit?: string;
+  accent?: boolean;
+  muted?: boolean;
+}) {
+  return (
+    <div
+      className={[
+        "stat",
+        accent ? "stat--accent" : "",
+        muted ? "stat--muted" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <span className="label">{label}</span>
+      <span className="value">
+        {value}
+        {unit && <span className="unit">{unit}</span>}
+      </span>
+    </div>
   );
 }

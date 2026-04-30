@@ -27,9 +27,6 @@ export const metadata: Metadata = {
     title: "GHC1CHEM Staking",
     description: "Stake $GHC1CHEM on Solana, earn USDC dividends.",
   },
-  icons: {
-    icon: "/favicon.ico",
-  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
