@@ -16,6 +16,7 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
+  createAssociatedTokenAccountIdempotentInstruction,
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import {
@@ -23,6 +24,7 @@ import {
   PublicKey,
   SystemProgram,
   SYSVAR_RENT_PUBKEY,
+  Transaction,
   type Commitment,
   type ConfirmOptions,
   type TransactionInstruction,
@@ -520,10 +522,30 @@ export class StakingClient {
       opts.tokenProgram ??
       (await resolveMintTokenProgram(this.provider.connection, usdcMint));
     const userUsdc = ataForTokenProgram(usdcMint, user, tokenProgram);
-    return this.program.methods
+
+    // Ensure the user's USDC ATA exists. Prepending an idempotent create
+    // instruction means the tx simulates cleanly even on the user's first
+    // claim (before they've ever held USDC). If the ATA already exists
+    // it's a no-op.
+    const createAtaIx = createAssociatedTokenAccountIdempotentInstruction(
+      user,        // payer
+      userUsdc,    // ata
+      user,        // owner
+      usdcMint,
+      tokenProgram,
+    );
+    const claimIx = await this.program.methods
       .claimRewards()
-      .accountsPartial({ user, stakeMint, usdcMint, userUsdcAccount: userUsdc, tokenProgram })
-      .rpc();
+      .accountsPartial({
+        user,
+        stakeMint,
+        usdcMint,
+        userUsdcAccount: userUsdc,
+        tokenProgram,
+      })
+      .instruction();
+    const tx = new Transaction().add(createAtaIx, claimIx);
+    return this.provider.sendAndConfirm!(tx);
   }
 
   async depositRewardsAndSend(
@@ -537,10 +559,27 @@ export class StakingClient {
       opts.tokenProgram ??
       (await resolveMintTokenProgram(this.provider.connection, usdcMint));
     const adminUsdc = ataForTokenProgram(usdcMint, admin, tokenProgram);
-    return this.program.methods
+
+    // Idempotent: ensures admin USDC ATA exists before transfer.
+    const createAtaIx = createAssociatedTokenAccountIdempotentInstruction(
+      admin,
+      adminUsdc,
+      admin,
+      usdcMint,
+      tokenProgram,
+    );
+    const depositIx = await this.program.methods
       .depositRewards(new BN(amount.toString()))
-      .accountsPartial({ admin, stakeMint, usdcMint, adminUsdcAccount: adminUsdc, tokenProgram })
-      .rpc();
+      .accountsPartial({
+        admin,
+        stakeMint,
+        usdcMint,
+        adminUsdcAccount: adminUsdc,
+        tokenProgram,
+      })
+      .instruction();
+    const tx = new Transaction().add(createAtaIx, depositIx);
+    return this.provider.sendAndConfirm!(tx);
   }
 
   // Expose a few helpers that callers sometimes need inline.
